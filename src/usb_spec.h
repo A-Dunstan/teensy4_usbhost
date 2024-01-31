@@ -1,0 +1,136 @@
+#ifndef _USB_SPEC_H
+#define _USB_SPEC_H
+
+#include <stdint.h>
+
+#define USB_CTRLTYPE_DIR_HOST2DEVICE     (0<<7)
+#define USB_CTRLTYPE_DIR_DEVICE2HOST     (1<<7)
+#define USB_CTRLTYPE_TYPE_STANDARD       (0<<5)
+#define USB_CTRLTYPE_TYPE_CLASS          (1<<5)
+#define USB_CTRLTYPE_TYPE_VENDOR         (2<<5)
+#define USB_CTRLTYPE_TYPE_RESERVED       (3<<5)
+#define USB_CTRLTYPE_REC_DEVICE          0
+#define USB_CTRLTYPE_REC_INTERFACE       1
+#define USB_CTRLTYPE_REC_ENDPOINT        2
+#define USB_CTRLTYPE_REC_OTHER           3
+
+#define USB_REQTYPE_DEVICE_GET           (USB_CTRLTYPE_DIR_DEVICE2HOST|USB_CTRLTYPE_TYPE_STANDARD|USB_CTRLTYPE_REC_DEVICE)
+#define USB_REQTYPE_DEVICE_SET           (USB_CTRLTYPE_DIR_HOST2DEVICE|USB_CTRLTYPE_TYPE_STANDARD|USB_CTRLTYPE_REC_DEVICE)
+#define USB_REQTYPE_INTERFACE_GET        (USB_CTRLTYPE_DIR_DEVICE2HOST|USB_CTRLTYPE_TYPE_STANDARD|USB_CTRLTYPE_REC_INTERFACE)
+#define USB_REQTYPE_INTERFACE_SET        (USB_CTRLTYPE_DIR_HOST2DEVICE|USB_CTRLTYPE_TYPE_STANDARD|USB_CTRLTYPE_REC_INTERFACE)
+
+#define USB_REQ_GET_STATUS               0
+#define USB_REQ_CLEAR_FEATURE            1
+#define USB_REQ_SET_FEATURE              3
+#define USB_REQ_SET_ADDRESS              5
+#define USB_REQ_GET_DESCRIPTOR           6
+#define USB_REQ_SET_CONFIGURATION        9
+#define USB_REQ_GET_INTERFACE            10
+#define USB_REQ_SET_INTERFACE            11
+
+#define USB_DT_DEVICE                    1
+#define USB_DT_CONFIGURATION             2
+#define USB_DT_STRING                    3
+#define USB_DT_INTERFACE                 4
+#define USB_DT_ENDPOINT                  5
+#define USB_DT_HUB                       0x29
+
+#define USB_ENDPOINT_CONTROL             0
+#define USB_ENDPOINT_ISOCHRONOUS         1
+#define USB_ENDPOINT_BULK                2
+#define USB_ENDPOINT_INTERRUPT           3
+
+typedef struct {
+  uint8_t bmRequestType;
+  uint8_t bmRequest;
+  uint16_t wValue;
+  uint16_t wIndex;
+  uint16_t wLength;
+} usb_control_setup;
+
+typedef struct {
+  uint8_t bLength;
+  uint8_t bDescriptorType;
+  uint16_t bcdUSB;
+  uint8_t bDeviceClass;
+  uint8_t bDeviceSubClass;
+  uint8_t bDeviceProtocol;
+  uint8_t bMaxPacketSize;
+  uint16_t idVendor;
+  uint16_t idProduct;
+  uint16_t bcdDevice;
+  uint8_t iManufacturer;
+  uint8_t iProduct;
+  uint8_t iSerialNumber;
+  uint8_t bNumConfigurations;
+} usb_device_descriptor;
+
+typedef struct {
+  uint8_t bLength;
+  uint8_t bDescriptorType;
+  union {
+    uint16_t wLANGID[0];
+    char16_t bString[0];
+  };
+} usb_string_descriptor;
+
+// these descriptors may occur unaligned so are all declared as packed
+
+typedef struct {
+  uint8_t bLength;
+  uint8_t bDescriptorType;
+  uint16_t wTotalLength;
+  uint8_t bNumInterfaces;
+  uint8_t bConfigurationValue;
+  uint8_t iConfiguration;
+  uint8_t bmAttributes;
+  uint8_t bMaxPower;
+} __attribute__((packed)) usb_configuration_descriptor;
+
+typedef struct {
+  uint8_t bLength;
+  uint8_t bDescriptorType;
+  uint8_t bInterfaceNumber;
+  uint8_t bAlternateSetting;
+  uint8_t bNumEndpoints;
+  uint8_t bInterfaceClass;
+  uint8_t bInterfaceSubClass;
+  uint8_t bInterfaceProtocol;
+  uint8_t iInterface;
+} __attribute__((packed)) usb_interface_descriptor;
+
+typedef struct {
+  uint8_t bLength;
+  uint8_t bDescriptorType;
+  uint8_t bEndpointAddress;
+  uint8_t bmAttributes;
+  uint16_t wMaxPacketSize;
+  uint8_t bInterval;
+} __attribute__((packed)) usb_endpoint_descriptor;
+
+#define USB_PORT_FEATURE_CONNECTION     0
+#define USB_PORT_FEATURE_ENABLE         1
+#define USB_PORT_FEATURE_SUSPEND        2
+#define USB_PORT_FEATURE_OVER_CURRENT   3
+#define USB_PORT_FEATURE_RESET          4
+#define USB_PORT_FEATURE_POWER          8
+#define USB_PORT_FEATURE_LOW_SPEED      9
+#define USB_PORT_FEATURE_C_CONNECTION   16
+#define USB_PORT_FEATURE_C_ENABLE       17
+#define USB_PORT_FEATURE_C_PORT_SUSPEND 18
+#define USB_PORT_FEATURE_C_PORT_OVER_CURRENT 19
+#define USB_PORT_FEATURE_C_RESET        20
+
+typedef struct {
+  uint8_t bLength;
+  uint8_t bDescriptorType;
+  uint8_t bNbrPorts;
+  uint16_t wHubCharacteristics;
+  uint8_t bPwrOn2PwrGood;
+  uint8_t bHubContrCurrent;
+  // technically this is an array but in practice
+  // nothing supports more than 7 ports
+  uint8_t DeviceRemovable;
+} __attribute__((packed)) usb_hub_descriptor;
+
+#endif
