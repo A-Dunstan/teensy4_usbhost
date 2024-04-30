@@ -46,7 +46,7 @@ friend class USB_FAT_Volume;
 
 	bool getCreateTime(DateTimeFields &tm) {
 		uint16_t fat_date, fat_time;
-		if (fsfile.getCreateDateTime(&fat_date, &fat_time)) return false;
+		if (!fsfile.getCreateDateTime(&fat_date, &fat_time)) return false;
 		if ((fat_date == 0) && (fat_time == 0)) return false;
 		tm.sec = FS_SECOND(fat_time);
 		tm.min = FS_MINUTE(fat_time);
@@ -59,7 +59,7 @@ friend class USB_FAT_Volume;
 
 	bool getModifyTime(DateTimeFields &tm) {
 		uint16_t fat_date, fat_time;
-		if (fsfile.getModifyDateTime(&fat_date, &fat_time)) return false;
+		if (!fsfile.getModifyDateTime(&fat_date, &fat_time)) return false;
 		if ((fat_date == 0) && (fat_time == 0)) return false;
 		tm.sec = FS_SECOND(fat_time);
 		tm.min = FS_MINUTE(fat_time);
