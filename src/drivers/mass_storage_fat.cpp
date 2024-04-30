@@ -207,6 +207,12 @@ bool USB_FAT_Volume::mount(USB_Storage* usb, uint8_t LUN, uint8_t part) {
 }
 
 bool USB_FAT_Volume::mount(USB_Storage* usb, uint8_t LUN) {
+	/* Check if the LUN is ready first. Otherwise the first
+	 * few partitions may fail and a later one succeed even
+	 * though the earlier partition(s) are usable.
+	 */
+	if (usb->lun_ready(LUN) < 0) return false;
+
 	return mount(usb, LUN, 1) || \
 		mount(usb, LUN, 0) || \
 		mount(usb, LUN, 2) || \

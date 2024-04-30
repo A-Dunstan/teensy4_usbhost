@@ -114,10 +114,17 @@ public:
 	/* convenience function: check if a LUN is ready, retrieve the sector count and size
 	 * Returns -1 on failure (check errno) and >= 0 on success
 	 * NOTE: a device may return FAILURE with errno==EAGAIN, this means it is likely in the process
-	 * of becoming ready. This is district from returning SUCCESS with sector count==0, which means
-	 * the device is "ready" but currently empty.
+	 * of becoming ready. This is distinct from returning SUCCESS with sector_count==0, which means
+	 * the device is "ready" but currently empty (e.g. CD drive with no disc).
 	 */
 	int lun_ready(uint8_t lun, uint64_t& sector_count, uint32_t& sector_size);
+
+	// simplified version, no parameters besides LUN
+	int lun_ready(uint8_t lun) {
+		uint64_t count;
+		uint32_t size;
+		return lun_ready(lun, count, size) && count>0;
+	}
 };
 
 #endif

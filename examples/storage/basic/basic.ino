@@ -2,17 +2,17 @@
  * FAT12, FAT16, FAT32 or EXFAT partition and recursively lists all directories/files.
  * All attached drives, their LUNs and the partitions on them will be searched
  * sequentially until a FAT partition is found.
+ * This only does a limited amount of retries; some USB drives require significant time
+ * to initialize themselves and become ready.
  */
 
-
-#include <string>
 #include <teensy4_usb.h>
 #include <usb_util.h>
 
 #define USE_MASS_STORAGE_FAT
 #include "usb_drivers.h"
 
-DMAMEM TeensyUSBHost2 usb;
+static DMAMEM TeensyUSBHost2 usb;
 static USB_FAT_Volume USBVol;
 
 void setup() {
