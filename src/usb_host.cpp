@@ -359,6 +359,7 @@ cbi(_cb) {
     length -= length0;
     error_handler = &extra[2];
     fill_qtd(&extra[2], this, true, length0, false, PID, buffer);
+    cb = extra[0].cb = extra[1].cb = NULL;
     if (length > 5* 4096) {
       next = &extra[0];
       size_t i=0;
