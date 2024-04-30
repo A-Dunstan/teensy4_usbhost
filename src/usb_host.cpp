@@ -1513,6 +1513,7 @@ void USB_Host::port_timeout(usb_msg_t& msg) {
           Enum.in_progress = true;
           return;
         } // else try again in 100ms
+        dprintf("Port %d:%d finished debounce but Enumerator is busy, delaying...\n", hub.hub_addr, port);
         ticked = 100;
         start = now;
       } else {
