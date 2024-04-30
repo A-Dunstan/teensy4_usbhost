@@ -3,8 +3,8 @@
 #define USE_CH341
 #include "usb_drivers.h"
 
-static USB_Host_Port1 usb;
-static ch341::serial USBSerial;
+DMAMEM static TeensyUSBHost2 usb;
+DMAMEM static ch341::serial USBSerial;
 
 uint32_t count, prior_count;
 uint32_t prior_msec;
