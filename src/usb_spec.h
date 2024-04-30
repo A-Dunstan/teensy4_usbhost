@@ -28,6 +28,8 @@
 #define USB_REQ_GET_INTERFACE            10
 #define USB_REQ_SET_INTERFACE            11
 
+#define USB_FEATURE_ENDPOINT_HALT        0
+
 #define USB_DT_DEVICE                    1
 #define USB_DT_CONFIGURATION             2
 #define USB_DT_STRING                    3
