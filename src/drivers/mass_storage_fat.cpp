@@ -1,4 +1,7 @@
 #include "mass_storage_fat.h"
+#include <ctime>
+
+extern "C" int _gettimeofday(struct timeval*, void*);
 
 #define MAX_FILENAME_LEN 256
 
@@ -117,6 +120,23 @@ bool USB_FAT_Volume::writeSectors(uint32_t sector, const uint8_t *src, size_t ns
 		return usbms->write(lun, sector, ns, src, length) >= (int)length;
 	}
 	return false;
+}
+
+void USB_FAT_Volume::TimeCB(uint16_t *date, uint16_t *time, uint8_t *ms10) {
+	struct timeval tv;
+	if (_gettimeofday(&tv, NULL) == 0) {
+		DateTimeFields dt;
+		breakTime(tv.tv_sec, dt);
+		if (dt.year >= 80) {
+			*date = FS_DATE(dt.year + 1900, dt.mon + 1, dt.mday);
+			*time = FS_TIME(dt.hour, dt.min, (dt.sec & ~1));
+			*ms10 = (tv.tv_usec / 10000) + ((dt.sec & 1) ? 100 : 0);
+			return;
+		}
+	}
+	*date = 0;
+	*time = 0;
+	*ms10 = 0;
 }
 
 File USB_FAT_Volume::open(const char* filename, uint8_t mode) {

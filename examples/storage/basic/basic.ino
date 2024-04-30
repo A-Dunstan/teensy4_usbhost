@@ -54,6 +54,7 @@ void setup() {
   if (CrashReport) CrashReport.printTo(Serial);
   
   usb.begin();
+  USBVol.begin();
   delay(1000);
   Serial.println("\n\nPress return to search for a USB drive");
 }

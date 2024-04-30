@@ -34,6 +34,8 @@ private:
 	bool writeSectors(uint32_t sector, const uint8_t *src, size_t ns);
 	bool writeSector(uint32_t sector, const uint8_t *src) { return writeSectors(sector, src, 1); }
 
+	static void TimeCB(uint16_t *date, uint16_t *time, uint8_t *ms10);
+
 	// FS methods
 public:
 	File open(const char *filename, uint8_t mode = FILE_READ);
@@ -51,6 +53,8 @@ public:
 	// uncopyable
 	USB_FAT_Volume(const USB_FAT_Volume&) = delete;
 	USB_FAT_Volume& operator=(const USB_FAT_Volume&) = delete;
+
+	static bool begin() { FsDateTime::setCallback(TimeCB); return true; };
 
 	// mount a FAT partition on the given device and LUN, at the specified location
 	bool mount(USB_Storage* usb, uint8_t LUN, uint32_t firstSector, uint32_t numSectors);
