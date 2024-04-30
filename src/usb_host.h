@@ -571,8 +571,8 @@ private:
   virtual uint32_t getMillis(void) = 0;
 
 public:
-  void activate_endpoint(USB_Endpoint *ep, USB_Device *device, bool periodic=false);
-  void deactivate_endpoint(USB_Endpoint *ep);
+  bool activate_endpoint(USB_Endpoint *ep, USB_Device *device, bool periodic=false);
+  bool deactivate_endpoint(USB_Endpoint *ep);
 };
 
 #endif

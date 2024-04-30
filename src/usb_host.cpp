@@ -2045,7 +2045,7 @@ void USB_Host::usb_process(void) {
   dprintf("USB: shutting down\n");
 }
 
-void USB_Host::activate_endpoint(USB_Endpoint *ep, USB_Device *dev, bool periodic) {
+bool USB_Host::activate_endpoint(USB_Endpoint *ep, USB_Device *dev, bool periodic) {
   usb_msg_t msg = {
     .type = USB_MSG_ENDPOINT_ACTIVATE,
     .endpoint = {
@@ -2054,15 +2054,15 @@ void USB_Host::activate_endpoint(USB_Endpoint *ep, USB_Device *dev, bool periodi
       .periodic = periodic
     }
   };
-  putMessage(msg);
+  return putMessage(msg);
 }
 
-void USB_Host::deactivate_endpoint(USB_Endpoint *ep) {
+bool USB_Host::deactivate_endpoint(USB_Endpoint *ep) {
   usb_msg_t msg = {
     .type = USB_MSG_ENDPOINT_DEACTIVATE,
     .endpoint = {
       .ep = ep
     }
   };
-  putMessage(msg);
+  return putMessage(msg);
 }
