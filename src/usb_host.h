@@ -101,8 +101,8 @@ typedef struct usb_qTD_t {
   void fill_qtd(usb_qTD_t* next_qtd, usb_qTD_t* alt_qtd, bool dt, uint16_t total, bool ioc, uint8_t pid, const void* data);
 } usb_qTD_t;
 
-// QUEUE HEAD: FIXED LAYOUT, MUST BE 32-BYTE ALIGNED
-typedef struct __attribute__((aligned(32))) usb_queue_head_t {
+// QUEUE HEAD: FIXED LAYOUT, MUST BE 32-BYTE ALIGNED + NOT CROSS 4096-BYTE BOUNDARY (64-BYTE ALIGNMENT)
+typedef struct __attribute__((aligned(64))) usb_queue_head_t {
   uint32_t horizontal_link;
   struct {
     uint32_t address:7;
