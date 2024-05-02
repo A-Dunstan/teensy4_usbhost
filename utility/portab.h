@@ -2,7 +2,6 @@
 #define _USB_PORTAB_H
 
 #include <imxrt.h>
-#include <teensyatom.h>
 
 #define CACHE_LINE_SIZE 32
 
@@ -67,4 +66,4 @@ static void __attribute__((unused)) cache_flush_invalidate(const void* p, size_t
   cache_sync();
 }
 
-#endif
+#endif // _USB_PORTAB_H
