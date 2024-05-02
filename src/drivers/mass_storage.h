@@ -43,9 +43,15 @@ private:
 
 	void detach(void);
 	USB_Storage(USB_Device*, uint8_t _interface, uint8_t _bulk_in, uint8_t _bulk_out);
-	~USB_Storage() {}
+	~USB_Storage();
+	/* List of all attached USB mass storage devices. This may be accessed by different
+	 * threads so it needs to be guarded.
+	 */
 	static std::list<class USB_Storage*> devices;
 
+	/* utility class for a mutex. autolock() returns an object that holds the mutex for
+	 * as long as it exists.
+	 */
 	class mutex_cxx : public ATOM_MUTEX {
 	public:
 		mutex_cxx() { atomMutexCreate(this); }
@@ -61,11 +67,13 @@ private:
 		};
 		class auto_lock autolock(void) { return auto_lock(*this); }
 	};
+	// actual mutex object that guards access to the device list
 	static mutex_cxx list_lock;
 
+	// performs USB mass storage reset - this affects *all* LUNs on the device
 	void reset();
-
 public:
+	// class instance factory methods, accessed by USB Host when a new device is inserted
 	static bool offer_interface(const usb_interface_descriptor*,size_t);
 	static USB_Driver* attach_interface(const usb_interface_descriptor*,size_t,USB_Device*);
 
@@ -83,7 +91,7 @@ public:
 
 	/* process a SCSI command (CDB), wrapping it with CBW/CSW transfers
 	 * Returns the number of bytes transferred (>= 0) on success or -1 on failure
-	 * errno should give an indiciation of the error encountered:
+	 * errno should give an indication of the error encountered:
 	 * ENODEV = USB device was disconnected from host
 	 * EPIPE,EOVERFLOW,EPROTO = USB protocol errors
 	 * ENXIO = invalid LUN specified
@@ -105,7 +113,7 @@ public:
 	int inquiry(uint8_t lun, void* dst, uint16_t length);
 	// read $count sectors starting at sector $lba for the specified LUN
 	int read(uint8_t lun, uint64_t lba, uint32_t count, void* dst, size_t length);
-	// write $count sectors startint at sector $lba for the specified LUN
+	// write $count sectors starting at sector $lba for the specified LUN
 	int write(uint8_t lun, uint64_t lba, uint32_t count, const void *src, size_t length);
 	// request $length amount of sense data from the specified LUN. $desc determines if
 	// the returned data is fixed format or descriptor format

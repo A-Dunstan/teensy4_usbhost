@@ -43,6 +43,8 @@ typedef struct basic_inquiry_response {
 	uint8_t :7; // reserved
 	uint8_t removable:1;
 
+	uint8_t version;
+
 	uint8_t response_data_format:4;
 	uint8_t hisup:1;
 	uint8_t normaca:1;
@@ -142,6 +144,10 @@ USB_Driver_FactoryGlue<USB_Storage>(d), interface(iface), bulk_in(ep_in), bulk_o
 			devices.push_back(this);
 		}
 	});
+}
+
+USB_Storage::~USB_Storage() {
+	dprintf("USB_Storage<%p> was destroyed\n", this);
 }
 
 bool USB_Storage::offer_interface(const usb_interface_descriptor* id, size_t) {
@@ -280,6 +286,8 @@ int USB_Storage::scsi_cmd(uint8_t lun, void* data, size_t length, const uint8_t*
 		if (ret < csw_tofetch) {
 			if (ret >= 0)
 				errno = EPROTO;
+			else
+				reset();
 			return -1;
 		}
 	}
