@@ -152,15 +152,16 @@ __attribute__((weak)) int usleep(useconds_t us) {
 // synchronous functions implemented using atomThreads (semaphores)
 static int sync_message(const std::function<int(const std::function<void(int)>&)> &Message_fn) {
 	ATOM_SEM sem;
-	errno = ENOMEM;
 	if (atomSemCreate(&sem, 0) == ATOM_OK) {
-		int result = Message_fn([&](int r) {
-			result = r;
+		// order of operations is tricky here; follow the numbers
+		int result = Message_fn([&](int r) { // 1: return value of async Control/Bulk/InterruptMessage request
+			// USB Host thread performs this action
+			result = r;    // 3: actual result of the transfer
 			atomSemPut(&sem);
 		});
-		if (result >= 0) {
+		if (result >= 0) { // 2: result of attempt to queue the transfer is checked
 			if (atomSemGet(&sem, 0) == ATOM_OK) {
-				if (result < 0) {
+				if (result < 0) { // 4: result of the transfer is checked
 					errno = -result;
 				}
 			} else {
@@ -171,6 +172,8 @@ static int sync_message(const std::function<int(const std::function<void(int)>&)
 		atomSemDelete(&sem);
 		if (result >= 0) return result;
 	}
+	else
+		errno = ENOMEM;
 	return -1;
 }
 
