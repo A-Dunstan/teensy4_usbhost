@@ -133,6 +133,14 @@ public:
 		uint32_t size;
 		return lun_ready(lun, count, size) && count>0;
 	}
+
+	/* these functions return "volatile" strings - they will be overwritten by
+	 * future calls to the device, so copy them if you want to keep them
+	 */
+	// perform inquiry and return the vendor name
+	const char* vendor_name(uint8_t lun);
+	// perform inquiry and return the product name
+	const char* product_name(uint8_t lun);
 };
 
 #endif

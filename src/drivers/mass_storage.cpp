@@ -408,6 +408,43 @@ int USB_Storage::inquiry(uint8_t lun, void *inq_data, uint16_t length) {
 	return scsi_cmd(lun, inq_data, length, cmd, false);
 }
 
+const char* USB_Storage::vendor_name(uint8_t lun) {
+	basic_inquiry_response inq;
+
+	if (inquiry(lun, &inq, sizeof(inq)) >= (int)sizeof(inq)) {
+		xfer.buf[8] = '\0';
+		unsigned int i;
+		for (i=8; i>0; i--) {
+			if (inq.T10_vendor[i-1] != ' ')
+				break;
+			xfer.buf[i-1] = '\0';
+		}
+		memcpy(xfer.buf, inq.T10_vendor, i);
+		return (char*)xfer.buf;
+	}
+
+	return "";
+}
+
+const char* USB_Storage::product_name(uint8_t lun) {
+	basic_inquiry_response inq;
+
+	if (inquiry(lun, &inq, sizeof(inq)) >= (int)sizeof(inq)) {
+		xfer.buf[16] = '\0';
+		unsigned int i;
+		for (i=16; i>0; i--) {
+			if (inq.product_id[i-1] != ' ')
+				break;
+			xfer.buf[i-1] = '\0';
+		}
+		memcpy(xfer.buf, inq.product_id, i);
+		return (char*)xfer.buf;
+	}
+
+	return "";
+}
+
+
 int USB_Storage::read(uint8_t lun, uint64_t lba, uint32_t count, void* data, size_t length) {
 	uint8_t cmd[16] = {0};
 	if (lba <= 0xFFFFFFFFu && count <= 0xFFFF) {
