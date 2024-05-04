@@ -8,7 +8,7 @@ extern "C" int _gettimeofday(struct timeval*, void*);
 class USBFATFile : public FileImpl {
 friend class USB_FAT_Volume;
 	USBFATFile(const FsFile &file) : fsfile(file), filename(NULL) {}
-	~USBFATFile(void) { close(); }
+	~USBFATFile(void) { close(); free(filename); }
 	size_t read(void *buf, size_t nbyte) { return fsfile.read(buf, nbyte); }
 	size_t write(const void* buf, size_t size) { return fsfile.write(buf, size); }
 	int available() { return fsfile.available(); }
@@ -24,16 +24,17 @@ friend class USB_FAT_Volume;
 	uint64_t position() { return fsfile.curPosition(); }
 	uint64_t size() { return fsfile.size(); }
 	void close() {
-		free(filename);
-		filename = NULL;
+		if (filename) filename[0] = '\0';
 		if (fsfile.isOpen()) fsfile.close();
 	}
 	bool isOpen() { return fsfile.isOpen(); }
 	const char* name() {
 		if (filename == NULL) {
 			filename = (char*)malloc(MAX_FILENAME_LEN);
-			if (filename)
+			if (filename) {
+				filename[0] = '\0';
 				fsfile.getName(filename, MAX_FILENAME_LEN);
+			}
 			else
 				return "";
 		}
