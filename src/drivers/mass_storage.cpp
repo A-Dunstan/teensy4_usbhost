@@ -270,11 +270,15 @@ int USB_Storage::scsi_cmd(uint8_t lun, void* data, size_t length, const uint8_t*
 			return -1;
 
 		if (ret < (int)to_send) {
+			dprintf("scsi_cmd: short data transfer %d vs %u\n", ret, to_send);
 			// the device may have skipped all the data and sent the CSW instead...
 			if (write == false && ret >= 4 && ret <= csw_tofetch && *(uint32_t*)p == CSW_SIGNATURE) {
+				dprintf("Got CSW instead of data\n");
 				memcpy(xfer.buf, p, ret);
 				csw_tofetch -= ret;
 			}
+			else
+				transferred += ret;
 			break;
 		}
 		transferred += to_send;
@@ -286,15 +290,20 @@ int USB_Storage::scsi_cmd(uint8_t lun, void* data, size_t length, const uint8_t*
 		if (ret < csw_tofetch) {
 			if (ret >= 0)
 				errno = EPROTO;
-			else
-				reset();
 			return -1;
 		}
 	}
 
 	if (xfer.csw.dCSWSignature == CSW_SIGNATURE && xfer.csw.dCSWTag == t) {
-		if (xfer.csw.bCSWStatus == 0) // success
+		if (xfer.csw.bCSWStatus == 0) { // success
+			uint32_t residue = xfer.csw.dCSWDataResidue;
+			if (residue != (length - transferred)) {
+				dprintf("SCSI: Residue mismatch, expected %u but received %u\n", length - transferred, residue);
+			}
+			else if (residue)
+				dprintf("SCSI RESIDUE: %u\n", residue);
 			return (int)transferred;
+		}
 		if (xfer.csw.bCSWStatus != 1) // phase error
 			reset();
 
