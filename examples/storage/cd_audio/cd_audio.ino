@@ -1,4 +1,6 @@
+#include <SD.h>
 #include <Audio.h>
+
 #include <teensy4_usb.h>
 #include <cerrno>
 #include <cstdlib>
