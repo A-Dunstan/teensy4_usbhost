@@ -77,7 +77,7 @@ void USB_Endpoint::update(void) {
 //    dprintf("EP<%p> usb transfer: %p, token %08lX, cb %p, data %p\n", this, static_cast<usb_qTD_t*>(t), t->token.val, t->cb, t->qtd_page[0]);
     if (t->token.status & 0x40) {
       // there was an error, walk the list until we find the next callback
-//      dprintf("USB TRANSFER ERROR %p\n", t);
+      dprintf("USB TRANSFER ERROR %p %08lX\n", t, t->token.val);
       ret = -EPIPE;
       uint32_t status = t->token.status;
       if (t->error_handler) {
