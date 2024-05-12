@@ -120,6 +120,7 @@ FLASHMEM void USBHostBase::phy_on(usb_phy_t *const PHY) {
   PHY->PWD.REG = 0;
 }
 
+#ifdef ARDUINO_TEENSY41
 FLASHMEM void TeensyUSBHost2::thread(void) {
   // enable USB protection IC GPIO (initially off)
   IOMUXC_SW_MUX_CTL_PAD_GPIO_EMC_40 = 5;
@@ -141,6 +142,7 @@ void TeensyUSBHost2::port_power(uint8_t port, bool set) {
     }
   }
 }
+#endif
 
 __attribute__((weak)) int usleep(useconds_t us) {
   const useconds_t us_per_tick = 1000000 / SYSTEM_TICKS_PER_SEC;
@@ -150,47 +152,54 @@ __attribute__((weak)) int usleep(useconds_t us) {
 }
 
 // synchronous functions implemented using atomThreads (semaphores)
-static int sync_message(const std::function<int(const std::function<void(int)>&)> &Message_fn) {
-	ATOM_SEM sem;
-	if (atomSemCreate(&sem, 0) == ATOM_OK) {
-		// order of operations is tricky here; follow the numbers
-		int result = Message_fn([&](int r) { // 1: return value of async Control/Bulk/InterruptMessage request
-			// USB Host thread performs this action
-			result = r;    // 3: actual result of the transfer
-			atomSemPut(&sem);
-		});
-		if (result >= 0) { // 2: result of attempt to queue the transfer is checked
-			if (atomSemGet(&sem, 0) == ATOM_OK) {
-				if (result < 0) { // 4: result of the transfer is checked
-					errno = -result;
-				}
-			} else {
-				result = -1;
-				errno = EINTR;
-			}
-		}
-		atomSemDelete(&sem);
-		if (result >= 0) return result;
-	}
-	else
-		errno = ENOMEM;
-	return -1;
+/* using a template here gives a better chance of the compiler inlining this into
+ * the calling function, which avoids creating/allocating space for the
+ * Control/Bulk/InterruptMessage lambda.
+ */
+template <class req_fn>
+static int sync_message(const req_fn &req) {
+  ATOM_SEM sem;
+  int result = -1;
+  if (atomSemCreate(&sem, 0) == ATOM_OK) {
+    int xfer_r;
+    // order of operations is tricky here, follow the numbers
+    result = req([&](int r) { // 1: queue async Control/Bulk/InterruptMessage request
+      // USB Host thread performs this action when transfer is complete
+      xfer_r = r;    // 4: actual result of the transfer
+      atomSemPut(&sem); // 5: unblock main thread
+    });
+
+    if (result >= 0) { // 2: result of attempt to queue the transfer is checked
+      if (atomSemGet(&sem, 0) == ATOM_OK) { // 3: main thread blocks
+        result = xfer_r;
+        if (result < 0) { // 6: result of the transfer is checked
+          errno = -result;
+        }
+      } else {
+        result = -1;
+        errno = EINTR;
+      }
+    }
+    atomSemDelete(&sem);
+  }
+  else errno = ENOMEM;
+  return result;
 }
 
 int USB_Driver::ControlMessage(uint8_t bmRequestType, uint8_t bmRequest, uint16_t wValue, uint16_t wIndex, uint16_t wLength, void *data) {
   return sync_message([&](const std::function<void(int)> &cb)->int {
-	  return ControlMessage(bmRequestType, bmRequest, wValue, wIndex, wLength, data, cb);
+    return ControlMessage(bmRequestType, bmRequest, wValue, wIndex, wLength, data, cb);
   });
 }
 
 int USB_Driver::BulkMessage(uint8_t bEndpoint, uint32_t dLength, void *data) {
   return sync_message([&](const std::function<void(int)> &cb)->int {
-	  return BulkMessage(bEndpoint, dLength, data, cb);
+    return BulkMessage(bEndpoint, dLength, data, cb);
   });
 }
 
 int USB_Driver::InterruptMessage(uint8_t bEndpoint, uint16_t wLength, void *data) {
   return sync_message([&](const std::function<void(int)> &cb)->int {
-	  return InterruptMessage(bEndpoint, wLength, data, cb);
+    return InterruptMessage(bEndpoint, wLength, data, cb);
   });
 }

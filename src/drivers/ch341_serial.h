@@ -88,14 +88,14 @@ public:
 
   operator bool ();
   void begin(uint32_t baud, uint16_t format, bool rts_cts);
-	void begin(uint32_t baud, uint16_t format=SERIAL_8N1) {begin(baud,format,true);}
-	void end();
-	int available(void);
-	int peek(void);
-	int read(void);
-	void flush(void);
-	int availableForWrite(void);
-	size_t write(uint8_t);
+  void begin(uint32_t baud, uint16_t format=SERIAL_8N1) {begin(baud,format,true);}
+  void end();
+  int available(void);
+  int peek(void);
+  int read(void);
+  void flush(void);
+  int availableForWrite(void);
+  size_t write(uint8_t);
 
   void detach(void);
   bool offer(const usb_device_descriptor* d,const usb_configuration_descriptor*);

@@ -35,7 +35,12 @@
 #define USB_DT_STRING                    3
 #define USB_DT_INTERFACE                 4
 #define USB_DT_ENDPOINT                  5
-#define USB_DT_HUB                       0x29
+#define USB_DT_DEVICE_QUALIFIER          6
+#define USB_DT_OTHER_SPEED_CONFIGURATION 7
+#define USB_DT_INTERFACE_POWER           8
+#define USB_DT_INTERFACE_ASSOCIATION     11
+#define USB_DT_HID                       (1 | USB_CTRLTYPE_TYPE_CLASS)
+#define USB_DT_HUB                       (9 | USB_CTRLTYPE_TYPE_CLASS)
 
 #define USB_ENDPOINT_CONTROL             0
 #define USB_ENDPOINT_ISOCHRONOUS         1
