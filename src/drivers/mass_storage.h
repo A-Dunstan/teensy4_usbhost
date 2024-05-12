@@ -131,7 +131,8 @@ public:
 	int lun_ready(uint8_t lun) {
 		uint64_t count;
 		uint32_t size;
-		return lun_ready(lun, count, size) && count>0;
+		int r = lun_ready(lun, count, size);
+		return (count == 0) ? -1 : r;
 	}
 
 	/* these functions return "volatile" strings - they will be overwritten by

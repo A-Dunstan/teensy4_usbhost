@@ -19,11 +19,12 @@
 
 class USB_FAT_Volume : private FsBlockDeviceInterface, public FS {
 private:
-	USB_Storage* usbms;
+	USB_Storage* usbms = NULL;
 	uint8_t lun;
 	uint64_t sector_count;
 	uint32_t sector_size;
 	FsVolume FAT;
+	uint8_t fat_type = 0;
 
 	// FsBlockDeviceInterface methods
 	bool isBusy();
@@ -48,7 +49,7 @@ public:
 	uint64_t totalSize();
 	bool mediaPresent();
 
-	USB_FAT_Volume() { usbms = NULL; }
+	USB_FAT_Volume()  = default;
 	~USB_FAT_Volume() { unmount(); }
 	// uncopyable
 	USB_FAT_Volume(const USB_FAT_Volume&) = delete;
@@ -70,7 +71,7 @@ public:
 	bool mount();
 
 	void unmount();
-	uint8_t type() const { return FAT.fatType(); }
+	uint8_t type() const { return fat_type; }
 };
 
 #endif

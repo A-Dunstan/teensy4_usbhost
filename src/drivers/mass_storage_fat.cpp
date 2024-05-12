@@ -180,8 +180,10 @@ bool USB_FAT_Volume::mount(USB_Storage* usb, uint8_t LUN, uint32_t firstSector, 
 			lun = LUN;
 			usbms = usb->open();
 			if (usbms != NULL) {
-				if (FAT.begin(this, true, firstSector, numSectors))
+				if (FAT.begin(this, true, firstSector, numSectors)) {
+					fat_type = FAT.fatType();
 					return true;
+				}
 				usbms->close();
 				usbms = NULL;
 			}
@@ -197,8 +199,10 @@ bool USB_FAT_Volume::mount(USB_Storage* usb, uint8_t LUN, uint8_t part) {
 			lun = LUN;
 			usbms = usb->open();
 			if (usbms != NULL) {
-				if (FAT.begin(this, true, part))
+				if (FAT.begin(this, true, part)) {
+					fat_type = FAT.fatType();
 					return true;
+				}
 				usbms->close();
 				usbms = NULL;
 			}
@@ -212,7 +216,11 @@ bool USB_FAT_Volume::mount(USB_Storage* usb, uint8_t LUN) {
 	 * few partitions may fail and a later one succeed even
 	 * though the earlier partition(s) are usable.
 	 */
-	if (usb->lun_ready(LUN) < 0) return false;
+	if (usb->lun_ready(LUN) < 0) {
+		// some USB drives may never initialize if mount() is called non-stop
+		delay(50);
+		return false;
+	}
 
 	return mount(usb, LUN, 1) || \
 		mount(usb, LUN, 0) || \
@@ -238,6 +246,7 @@ bool USB_FAT_Volume::mount() {
 
 void USB_FAT_Volume::unmount() {
 	FAT.end();
+	fat_type = 0;
 	if (usbms) {
 		usbms->close();
 		usbms = NULL;
