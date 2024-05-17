@@ -218,7 +218,7 @@ bool USB_FAT_Volume::mount(USB_Storage* usb, uint8_t LUN) {
 	 */
 	if (usb->lun_ready(LUN) < 0) {
 		// some USB drives may never initialize if mount() is called non-stop
-		delay(50);
+		atomTimerDelay(SYSTEM_TICKS_PER_SEC * 50 / 1000);
 		return false;
 	}
 
