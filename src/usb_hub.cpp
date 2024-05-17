@@ -217,7 +217,7 @@ void USB_Hub_Driver::deref(void) {
 }
 
 void USB_Hub_Driver::do_poll(void) {
-  dev->BulkInterruptTransfer(status_ep, sizeof(port_change), port_change, this, USB_ENDPOINT_INTERRUPT);
+  dev->InterruptTransfer(status_ep, sizeof(port_change), port_change, this);
 }
 
 void USB_Hub_Driver::request_status(uint8_t port) {
