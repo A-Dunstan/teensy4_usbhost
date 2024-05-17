@@ -251,6 +251,7 @@ static void play_disc(uint8_t track) {
 }
 
 static void play_track(uint32_t track) {
+  if (track==0) track = 1;
   uint32_t start = read_toc(track);
   uint32_t end = read_toc(track+1);
 
