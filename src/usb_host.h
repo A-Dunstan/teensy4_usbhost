@@ -340,11 +340,33 @@ private:
   const uint8_t address;
   std::atomic_uint refcount;
 
-  // 0-14=OUT,15-29=IN
-  struct {
-    USB_Bulk_Interrupt_Endpoint *ep;
-    int type;
-  } Endpoints[30];
+  struct Endpoint_Elem {
+	  USB_Bulk_Interrupt_Endpoint *ep;
+	  int type;
+  };
+
+  class Endpoint_Array {
+  private:
+    // 1-15=OUT,16-30=IN
+    Endpoint_Elem eps[31];
+  public:
+    Endpoint_Elem& operator[] (size_t ep_addr) {
+      size_t index = ep_addr & 0x7F;
+      if (index != 0) {
+        if (index >= 16) index = 0;
+        else if (ep_addr & 0x80) index += 15;
+      }
+      return eps[index];
+	}
+	Endpoint_Array() {
+      for (size_t i=0; i < sizeof(eps)/sizeof(eps[0]); i++) {
+        eps[i].ep = NULL;
+        eps[i].type = -1;
+      }
+    }
+  };
+
+  Endpoint_Array Endpoints;
 
   class dev_interface {
     class setting {

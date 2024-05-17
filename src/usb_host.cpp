@@ -673,13 +673,9 @@ void USB_Device::callback(usb_control_transfer *t, int result) {
 		  uint8_t endpoint = t->getwIndex();
 		  dprintf("HALT was cleared for endpoint %02X\n", endpoint);
 		  // data toggle must be reset in queue head
-		  if (endpoint & 0x7F) {
-			  if (endpoint & 0x80) endpoint = endpoint - 0x80 + 15 - 1;
-			  else --endpoint;
-			  int ep_type = Endpoints[endpoint].type;
-			  if (ep_type == USB_ENDPOINT_INTERRUPT || ep_type == USB_ENDPOINT_BULK) {
-				  Endpoints[endpoint].ep->flush();
-			  }
+		  int ep_type = Endpoints[endpoint].type;
+		  if (ep_type == USB_ENDPOINT_INTERRUPT || ep_type == USB_ENDPOINT_BULK) {
+			  Endpoints[endpoint].ep->flush();
 		  }
 		}
 		else dprintf("Clearing endpoint halt failed\n");
@@ -719,9 +715,6 @@ address(_address),
 refcount(2) // hub and control endpoint have a reference
 {
   dprintf("New Device<%p>: address %d, port %d, hub %d, speed %d, control_packet_size %d\n", this, address, port, hub_addr, speed, control_packet_size);
-  for (size_t i=0; i < (sizeof(Endpoints)/sizeof(Endpoints[0])); i++) {
-    Endpoints[i] = {NULL, -1};
-  }
   memset(&ddesc, 0, sizeof(ddesc));
   string_lang = 0;
   active_config = -1;
@@ -731,8 +724,10 @@ refcount(2) // hub and control endpoint have a reference
 
 void USB_Device::disconnect(void) {
   // control endpoint last
-  for (size_t i=0;i < (sizeof(Endpoints)/sizeof(Endpoints[0]));i++)
+  for (size_t i=1; i < 16; i++) {
     deactivate_endpoint(i);
+    deactivate_endpoint(0x80|i);
+  }
   host->deactivate_endpoint(&control);
   deref();
 }
@@ -828,8 +823,7 @@ void USB_Device::deactivate_endpoint(size_t i) {
 }
 
 void USB_Device::activate_endpoint(const usb_endpoint_descriptor* p) {
-  bool in = p->bEndpointAddress & 0x80;
-  size_t i = (p->bEndpointAddress & 0xF) + (in ? 15:0) - 1;
+  size_t i = p->bEndpointAddress;
   if (Endpoints[i].type >= 0) {
     dprintf("Device<%p> activate_endpoint error: endpoint already exists for address %u\n", this, p->bEndpointAddress);
     return;
@@ -1119,12 +1113,11 @@ void USB_Device::ControlTransfer(uint8_t bmRequestType, uint8_t bmRequest, uint1
 
 void USB_Device::BulkInterruptTransfer(uint8_t bEndpoint, uint32_t dLength, void *data, CCallback<usb_bulk_interrupt_transfer>* cb, int type) {
   errno = ENXIO;
-  size_t idx = bEndpoint & 0x7F;
-  if (idx >= 1 && idx <= 15) {
-    idx += (bEndpoint & 0x80 ? 15:0) - 1;
-    if (Endpoints[idx].type==type && Endpoints[idx].ep->message(dLength, data, cb)==0)
+  if (Endpoints[bEndpoint].type==type) {
+    if (Endpoints[bEndpoint].ep->message(dLength, data, cb)==0)
       return;
   }
+  else errno = ENXIO;
   cb->callback(NULL, -errno);
 }
 
