@@ -36,65 +36,6 @@
 #define USBMS_REQ_GET_MAX_LUN  254
 #define USBMS_REQ_RESET        255
 
-typedef struct basic_inquiry_response {
-	uint8_t peripheral_device_type:5;
-	uint8_t peripheral_qualifier:3;
-
-	uint8_t :7; // reserved
-	uint8_t removable:1;
-
-	uint8_t version;
-
-	uint8_t response_data_format:4;
-	uint8_t hisup:1;
-	uint8_t normaca:1;
-	uint8_t :2; // obsolete
-
-	uint8_t additional_length;
-
-	uint8_t protect:1;
-	uint8_t :2; // reserved
-	uint8_t third_pc:1;
-	uint8_t tpgs:1;
-	uint8_t acc:1;
-	uint8_t sccs:1;
-
-	uint8_t :4; // obsolete
-	uint8_t multip:1;
-	uint8_t :1; // vendor-specific
-	uint8_t encserv:1;
-	uint8_t :1; // obsolete
-
-	uint8_t :1; // vendor-specific
-	uint8_t cmdque:1;
-	uint8_t :6; // obsolete
-
-	uint8_t T10_vendor[8];
-	uint8_t product_id[16];
-	uint8_t product_rev[4];
-} basic_inquiry_response;
-
-typedef struct basic_sense_data {
-	uint8_t response_code:7;
-	uint8_t valid:1;
-
-	uint8_t :8; // obsolete
-
-	uint8_t sense_key:4;
-	uint8_t :1; // reserved
-	uint8_t ili:1;
-	uint8_t eom:1;
-	uint8_t filemark:1;
-
-	uint8_t information[4];
-	uint8_t additional_sense_length;
-	uint8_t command_specific_information[4];
-	uint8_t additional_sense_code;
-	uint8_t additional_sense_code_qualifier;
-	uint8_t field_replaceable_unit_code;
-	uint8_t sense_key_specific[3];
-} basic_sense_data;
-
 std::list<USB_Storage*> USB_Storage::devices;
 USB_Storage::mutex_cxx USB_Storage::list_lock;
 
