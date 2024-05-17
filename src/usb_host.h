@@ -80,6 +80,72 @@ typedef union {
   uint16_t val;
 } port_status_t;
 
+// ISOCHRONOUS (HIGH-SPEED) TRANSFER DESCRIPTOR: FIXED LAYOUT (64-BYTE ALIGNED)
+typedef struct __attribute__((aligned(64))) usb_iTD_t {
+	uint32_t horizontal_link;
+	struct {
+		uint32_t offset:12;
+		uint32_t PG:3;
+		uint32_t IOC:1;
+		uint32_t total:12;
+		uint32_t status:4;
+	} transfers[8];
+
+	uint32_t address:7;
+	uint32_t :1;
+	uint32_t endpt:4;
+	uint32_t page0:20;
+	uint32_t wMaxPacketSize:11;
+	uint32_t dir:1;
+	uint32_t page1:20;
+	uint32_t Mult:2;
+	uint32_t :10;
+	uint32_t page2:20;
+	uint32_t :12;
+	uint32_t page3:20;
+	uint32_t :12;
+	uint32_t page4:20;
+	uint32_t :12;
+	uint32_t page5:20;
+	uint32_t :12;
+	uint32_t page6:20;
+} usb_iTD_t;
+
+// SPLIT-TRANSACTION ISOCHRONOUS TRANSACTION DESCRIPTOR: FIXED LAYOUT (32-BYTE ALIGNED)
+typedef struct __attribute__((aligned(32))) usb_siTD_t {
+	uint32_t horizontal_link;
+
+	uint32_t address:7;
+	uint32_t :1;
+	uint32_t endpt:4;
+	uint32_t :4;
+	uint32_t hub:7;
+	uint32_t :1;
+	uint32_t port:7;
+	uint32_t dir:1;
+
+	uint8_t s_mask;
+	uint8_t c_mask;
+	uint16_t :16;
+	uint8_t status;
+	uint8_t c_prog_mask;
+
+	uint16_t total:10;
+	uint16_t :4;
+	uint16_t P:1;
+	uint16_t IOC:1;
+
+	uint32_t offset:12;
+	uint32_t page0:20;
+
+	uint32_t t_count:3;
+	uint32_t TP:2;
+	uint32_t :7;
+	uint32_t page1:20;
+
+	uint32_t back_pointer;
+} usb_siTD_t;
+
 // QUEUE ELEMENT TRANSFER DESCRIPTOR: FIXED LAYOUT (32-BYTE ALIGNED EXCEPT IN QUEUE HEAD)
 typedef struct usb_qTD_t {
   struct usb_qTD_t* next;
@@ -272,6 +338,26 @@ public:
   uint8_t endpoint_type(void) { return USB_ENDPOINT_INTERRUPT; }
 };
 
+class usb_sitd_transfer : public usb_siTD_t {
+public:
+	class usb_sitd_transfer *next;
+};
+
+class usb_iso_transfer {
+};
+
+class USB_ISO_Endpoint : public USB_Endpoint {
+private:
+  void update(void) {}
+  void flush(void) {}
+  usb_sitd_transfer *transfers;
+
+  const bool dir_in;
+public:
+  USB_ISO_Endpoint(uint8_t endpoint, uint16_t max_packet_size, uint8_t address, uint8_t hub_addr, uint8_t port, uint8_t speed, uint32_t interval);
+  uint8_t endpoint_type(void) { return USB_ENDPOINT_ISOCHRONOUS; }
+};
+
 class USB_Hub {
   friend class USB_Host;
 private:
@@ -308,6 +394,7 @@ typedef enum {
   USB_MSG_DEVICE_CONTROL_TRANSFER,
   USB_MSG_DEVICE_BULK_TRANSFER,
   USB_MSG_DEVICE_INTERRUPT_TRANSFER,
+  USB_MSG_DEVICE_ISOCHRONOUS_TRANSFER,
 } usb_msg_type_t;
 
 typedef struct {
@@ -462,6 +549,7 @@ private:
     BulkInterruptTransfer(bEndpoint, dLength, data, cb, false);
   }
   void ControlTransfer(uint8_t bmRequestType, uint8_t bmRequest, uint16_t wValue, uint16_t wIndex, uint16_t wLength, void *data, CCallback<usb_control_transfer>*);
+  void IsoTransfer(uint8_t bEndpoint, uint32_t dLength, void *data, CCallback<usb_iso_transfer>*);
 
 public:
   static uint8_t validate_descriptor(const uint8_t* desc, int length) {

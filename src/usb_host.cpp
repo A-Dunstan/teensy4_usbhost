@@ -433,6 +433,10 @@ USB_Interrupt_Endpoint::USB_Interrupt_Endpoint(uint8_t endpoint, uint16_t max_pa
   }
 }
 
+USB_ISO_Endpoint::USB_ISO_Endpoint(uint8_t endpoint, uint16_t max_packet_size, uint8_t address, uint8_t hub_addr, uint8_t port, uint8_t speed, uint32_t interval)
+: dir_in(endpoint & 0x80) {
+}
+
 USB_Hub::USB_Hub(uint8_t addr) : hub_addr(addr) {
   for (size_t i=0; i < sizeof(port)/sizeof(port[0]); i++) {
     port[i].state = 0;
@@ -850,8 +854,17 @@ void USB_Device::activate_endpoint(const usb_endpoint_descriptor* p) {
           return;
       }
       break;
-    case USB_ENDPOINT_CONTROL:
     case USB_ENDPOINT_ISOCHRONOUS:
+      refcount.fetch_add(1);
+      Endpoints[i].ep = new(std::nothrow) USB_ISO_Endpoint(p->bEndpointAddress, p->wMaxPacketSize, address, hub_addr, port, speed, p->bInterval);
+      if (Endpoints[i].ep != NULL) {
+        Endpoints[i].type = USB_ENDPOINT_ISOCHRONOUS;
+        if (host->activate_endpoint(Endpoints[i].ep, this))
+          return;
+	  }
+	  break;
+    //case USB_ENDPOINT_CONTROL:
+    default:
       dprintf("Unsupported endpoint type: %02X\n", p->bmAttributes);
       return;
   }
@@ -1128,6 +1141,7 @@ bool USB_Device::pushMessage(usb_msg_t& msg) {
     case USB_MSG_DEVICE_CONTROL_TRANSFER:
     case USB_MSG_DEVICE_BULK_TRANSFER:
     case USB_MSG_DEVICE_INTERRUPT_TRANSFER:
+    case USB_MSG_DEVICE_ISOCHRONOUS_TRANSFER:
       msg.device.dev = this;
       refcount.fetch_add(1);
     default:
@@ -2077,6 +2091,7 @@ void USB_Host::usb_process(void) {
       case USB_MSG_DEVICE_CONTROL_TRANSFER:
       case USB_MSG_DEVICE_BULK_TRANSFER:
       case USB_MSG_DEVICE_INTERRUPT_TRANSFER:
+      case USB_MSG_DEVICE_ISOCHRONOUS_TRANSFER:
         // forward to device
         msg.device.dev->USBMessage(msg);
         continue;
