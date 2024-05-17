@@ -52,23 +52,27 @@ private:
 	/* utility class for a mutex. autolock() returns an object that holds the mutex for
 	 * as long as it exists.
 	 */
-	class mutex_cxx : public ATOM_MUTEX {
+	class mutex_cxx {
+	private:
+		ATOM_MUTEX mtx;
 	public:
-		mutex_cxx() { atomMutexCreate(this); }
-		~mutex_cxx() { atomMutexDelete(this); }
+		mutex_cxx() { atomMutexCreate(&mtx); }
+		~mutex_cxx() { atomMutexDelete(&mtx); }
 
 		class auto_lock {
 		private:
 			const uint8_t locked;
-			mutex_cxx& lck;
+			ATOM_MUTEX *lck;
 		public:
-			auto_lock(mutex_cxx& g) : locked(atomMutexGet(&g, SYSTEM_TICKS_PER_SEC)), lck(g) {}
-			~auto_lock() { if (locked == ATOM_OK) atomMutexPut(&lck); }
+			auto_lock(ATOM_MUTEX *g) : locked(atomMutexGet(g, SYSTEM_TICKS_PER_SEC*5)), lck(g) {}
+			~auto_lock() { if (locked == ATOM_OK) atomMutexPut(lck); }
+			operator bool() { return locked == ATOM_OK; }
 		};
-		class auto_lock autolock(void) { return auto_lock(*this); }
+		class auto_lock autolock(void) { return auto_lock(&mtx); }
 	};
 	// actual mutex object that guards access to the device list
 	static mutex_cxx list_lock;
+	mutex_cxx cmd_lock;
 
 	// performs USB mass storage reset - this affects *all* LUNs on the device
 	void reset();

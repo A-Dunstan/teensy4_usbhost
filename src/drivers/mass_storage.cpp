@@ -210,6 +210,11 @@ void USB_Storage::reset(void) {
 }
 
 int USB_Storage::scsi_cmd(uint8_t lun, void* data, size_t length, const uint8_t* command, bool write) {
+	auto lck = cmd_lock.autolock();
+	if (!lck) {
+		errno = ETIMEDOUT;
+		return -1;
+	}
 	size_t commandLength;
 	int csw_tofetch = sizeof(ms_csw);
 
