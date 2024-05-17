@@ -893,7 +893,7 @@ void USB_Device::activate_interface(uint8_t interface, int altsetting) {
       if (ep == NULL)
         break;
       for (auto ep_it = to_remove.begin(); ep_it != to_remove.end(); ep_it++) {
-        if (memcmp(ep, *ep_it, sizeof(usb_endpoint_descriptor))==0) {
+        if (ep->bLength == (*ep_it)->bLength && memcmp(ep, *ep_it, ep->bLength)==0) {
           // endpoint is the same in old and new interface, don't need to do anything with it
           to_remove.erase(ep_it, ep_it+1);
           ep = NULL;
