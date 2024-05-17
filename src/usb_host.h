@@ -102,7 +102,9 @@ typedef struct usb_qTD_t {
 } usb_qTD_t;
 
 // QUEUE HEAD: FIXED LAYOUT, MUST BE 32-BYTE ALIGNED + NOT CROSS 4096-BYTE BOUNDARY (64-BYTE ALIGNMENT)
-typedef struct __attribute__((aligned(64))) usb_queue_head_t {
+class __attribute__((aligned(64))) usb_queue_head_t {
+friend class USB_Host;
+protected:
   uint32_t horizontal_link;
   struct {
     uint32_t address:7;
@@ -123,7 +125,13 @@ typedef struct __attribute__((aligned(64))) usb_queue_head_t {
   } capabilities;
   usb_qTD_t* current;
   usb_qTD_t overlay;
-} usb_queue_head_t;
+
+  void sync_after_write(void) const;
+  void sync_before_read(void);
+  void clean_after_write(void);
+private: // pad size to 64 bytes
+  uint32_t pad[4];
+};
 
 class __attribute__((aligned(32))) usb_qTD_aligned : public usb_qTD_t {};
 
@@ -149,28 +157,35 @@ public:
   void sync_before_read(void);
 };
 
-class USB_Endpoint : protected usb_queue_head_t {
-  friend class USB_Host;
+class USB_Endpoint {
+protected:
+  USB_Endpoint() = default;
+
+public:
+  class USB_Endpoint* host_next = NULL;
+  class USB_Device* device = NULL;
+
+  virtual void update(void) = 0;
+  virtual void flush(void) = 0;
+  virtual uint8_t endpoint_type(void) = 0;
+
+  virtual ~USB_Endpoint() = default;
+};
+
+class USB_QH_Endpoint : public USB_Endpoint, public usb_queue_head_t {
 private:
   usb_transfer* pending;
   usb_transfer* dummy;
   bool active;
 
-  class USB_Endpoint* host_next;
-  class USB_Device* device;
-
-  void sync_after_write(void) const;
-  void sync_before_read(void);
-  void clean_after_write(void);
-
   void update(void);
-  
 protected:
-  USB_Endpoint(uint8_t endpoint, uint16_t max_packet_size, uint8_t hub, uint8_t port, uint8_t address, uint8_t speed);
+  void flush(void);
+
+  USB_QH_Endpoint(uint8_t endpoint, uint16_t max_packet_size, uint8_t hub, uint8_t port, uint8_t address, uint8_t speed);
   bool enqueue_transfer(usb_transfer* head);
 public:
-  void flush(void);
-  ~USB_Endpoint();
+  ~USB_QH_Endpoint();
 };
 
 class usb_control_transfer {
@@ -193,7 +208,7 @@ class static_usb_transfer : public usb_transfer {
   void operator delete(void*,size_t) {}
 };
 
-class USB_Control_Endpoint : public USB_Endpoint {
+class USB_Control_Endpoint : public USB_QH_Endpoint {
 private:
   class transfer : public usb_transfer, private CCallback<usb_transfer>, private usb_control_transfer {
   private:
@@ -211,6 +226,7 @@ private:
 public:
   USB_Control_Endpoint(uint8_t max_packet_size, uint8_t address, uint8_t hub, uint8_t port, uint8_t speed);
   int message(uint8_t bmRequestType, uint8_t bmRequest, uint16_t wValue, uint16_t wIndex, uint16_t wLength, void *buffer, CCallback<usb_control_transfer>* cb);
+  uint8_t endpoint_type(void) { return USB_ENDPOINT_CONTROL; }
 };
 
 class usb_bulk_interrupt_transfer {
@@ -224,7 +240,7 @@ public:
   const void* getBuffer(void) const { return buffer; }
 };
 
-class USB_Bulk_Interrupt_Endpoint : public USB_Endpoint {
+class USB_Bulk_Interrupt_Endpoint : public USB_QH_Endpoint {
 private:
   class transfer : public usb_transfer, private CCallback<usb_transfer>, private usb_bulk_interrupt_transfer {
   private:
@@ -240,7 +256,10 @@ private:
 public:
   USB_Bulk_Interrupt_Endpoint(uint8_t endpoint, uint16_t max_packet_size, uint8_t address, uint8_t hub_addr, uint8_t port, uint8_t speed);
   int message(uint32_t Length, void *buffer, CCallback<class usb_bulk_interrupt_transfer>* cb);
+  uint8_t endpoint_type(void) { return USB_ENDPOINT_BULK; }
 };
+
+typedef USB_Bulk_Interrupt_Endpoint USB_Bulk_Endpoint;
 
 class USB_Interrupt_Endpoint : public USB_Bulk_Interrupt_Endpoint {
   friend class USB_Host;
@@ -250,6 +269,7 @@ private:
   uint32_t interval; // calculated interval in uframes, mapped to PERIODIC_LIST_SIZE*8
 public:
   USB_Interrupt_Endpoint(uint8_t endpoint, uint16_t max_packet_size, uint8_t address, uint8_t hub_addr, uint8_t port, uint8_t speed, uint32_t interval);
+  uint8_t endpoint_type(void) { return USB_ENDPOINT_INTERRUPT; }
 };
 
 class USB_Hub {
@@ -301,7 +321,6 @@ typedef struct {
     struct {
       USB_Endpoint *ep;
       USB_Device *device;
-      bool periodic;
     } endpoint;
     struct {
       class USB_Device *dev;
@@ -341,7 +360,7 @@ private:
   std::atomic_uint refcount;
 
   struct Endpoint_Elem {
-	  USB_Bulk_Interrupt_Endpoint *ep;
+	  USB_Endpoint *ep;
 	  int type;
   };
 
@@ -435,8 +454,14 @@ private:
 
   static uint8_t validate_descriptor(const uint8_t* &desc, const uint8_t* const end);
 
+  void BulkInterruptTransfer(uint8_t bEndpoint, uint32_t dLength, void *data, CCallback<usb_bulk_interrupt_transfer>*, bool bulk);
+  void BulkTransfer(uint8_t bEndpoint, uint32_t dLength, void* data, CCallback<usb_bulk_interrupt_transfer>* cb) {
+    BulkInterruptTransfer(bEndpoint, dLength, data, cb, true);
+  }
+  void InterruptTransfer(uint8_t bEndpoint, uint32_t dLength, void* data, CCallback<usb_bulk_interrupt_transfer>* cb) {
+    BulkInterruptTransfer(bEndpoint, dLength, data, cb, false);
+  }
   void ControlTransfer(uint8_t bmRequestType, uint8_t bmRequest, uint16_t wValue, uint16_t wIndex, uint16_t wLength, void *data, CCallback<usb_control_transfer>*);
-  void BulkInterruptTransfer(uint8_t bEndpoint, uint32_t dLength, void *data, CCallback<usb_bulk_interrupt_transfer>*, int type);
 
 public:
   static uint8_t validate_descriptor(const uint8_t* desc, int length) {
@@ -567,13 +592,13 @@ private:
 
   void notify_endpoint_removed(USB_Endpoint *ep);
   void update_transfers(void);
-  void add_async_queue(USB_Endpoint *ep);
-  bool remove_async_queue(USB_Endpoint *ep);
+  void add_async_queue(USB_QH_Endpoint *ep);
+  bool remove_async_queue(USB_QH_Endpoint *ep);
   bool calculate_offset(USB_Interrupt_Endpoint *ep, uint32_t &offset) const;
   void unschedule_periodic(void);
   void add_periodic_queue(USB_Interrupt_Endpoint *ep);
   bool remove_periodic_queue(USB_Interrupt_Endpoint *ep);
-  
+
   void port_power(uint8_t port, bool set);
   void port_reset(uint8_t port, bool set);
   void port_enable(uint8_t port, bool set);
@@ -595,7 +620,7 @@ private:
   virtual uint32_t getMillis(void) = 0;
 
 public:
-  bool activate_endpoint(USB_Endpoint *ep, USB_Device *device, bool periodic=false);
+  bool activate_endpoint(USB_Endpoint *ep, USB_Device *device);
   bool deactivate_endpoint(USB_Endpoint *ep);
 };
 

@@ -54,19 +54,19 @@ void usb_qTD_t::fill_qtd(usb_qTD_t* next_qtd, usb_qTD_t* alt_qtd, bool dt, uint1
   }
 }
 
-void USB_Endpoint::sync_after_write(void) const {
-  cache_flush(static_cast<const usb_queue_head_t*>(this), sizeof(usb_queue_head_t));
+void usb_queue_head_t::sync_after_write(void) const {
+  cache_flush(this, sizeof(usb_queue_head_t));
 }
 
-void USB_Endpoint::sync_before_read(void) {
-  cache_invalidate(static_cast<usb_queue_head_t*>(this), sizeof(usb_queue_head_t));
+void usb_queue_head_t::sync_before_read(void) {
+  cache_invalidate(this, sizeof(usb_queue_head_t));
 }
 
-void USB_Endpoint::clean_after_write(void) {
-  cache_flush_invalidate(static_cast<usb_queue_head_t*>(this), sizeof(usb_queue_head_t));
+void usb_queue_head_t::clean_after_write(void) {
+  cache_flush_invalidate(this, sizeof(usb_queue_head_t));
 }
 
-void USB_Endpoint::update(void) {
+void USB_QH_Endpoint::update(void) {
   while (pending != dummy) {
     int ret = 0;
     usb_transfer* t = pending;
@@ -128,7 +128,7 @@ void USB_Endpoint::update(void) {
   }
 }
 
-USB_Endpoint::~USB_Endpoint() {
+USB_QH_Endpoint::~USB_QH_Endpoint() {
   // this endpoint has been removed from the async or periodic schedule and won't process any more transfers
   dprintf("Endpoint %p cleanup\n", this);
   active = false;
@@ -144,7 +144,7 @@ USB_Endpoint::~USB_Endpoint() {
   delete t;
 }
 
-void USB_Endpoint::flush(void) {
+void USB_QH_Endpoint::flush(void) {
   // get rid of any pending transfers
   dprintf("Endpoint %p flush\n", this);
   sync_before_read();
@@ -162,9 +162,10 @@ void USB_Endpoint::flush(void) {
     t = next;
   }
   pending = t;
+
 }
 
-USB_Endpoint::USB_Endpoint(uint8_t endpoint, uint16_t max_packet_size, uint8_t hub, uint8_t port, uint8_t address, uint8_t speed) {
+USB_QH_Endpoint::USB_QH_Endpoint(uint8_t endpoint, uint16_t max_packet_size, uint8_t hub, uint8_t port, uint8_t address, uint8_t speed) {
   dummy = new usb_transfer;
   dummy->token.status = 0x40; // halt
   dummy->sync_after_write();
@@ -195,11 +196,10 @@ USB_Endpoint::USB_Endpoint(uint8_t endpoint, uint16_t max_packet_size, uint8_t h
   overlay.alt = QTD_PTR_INVALID;
   overlay.next = dummy;
 
-  host_next = NULL;
   active = true;
 }
 
-bool USB_Endpoint::enqueue_transfer(usb_transfer* head) {
+bool USB_QH_Endpoint::enqueue_transfer(usb_transfer* head) {
   if (!active) {
     errno = ENODEV;
     return false;
@@ -273,7 +273,7 @@ void *_buffer, CCallback<usb_control_transfer>* _cb, bool release_mem) : cb(_cb)
 }
 
 USB_Control_Endpoint::USB_Control_Endpoint(uint8_t max_packet_size, uint8_t address, uint8_t hub, uint8_t port, uint8_t speed) :
-USB_Endpoint(0, max_packet_size, hub, port, address, speed) {
+USB_QH_Endpoint(0, max_packet_size, hub, port, address, speed) {
   if (speed < 2) capabilities.C = 1;
   capabilities.DTC = 1;
 }
@@ -376,7 +376,7 @@ cbi(_cb) {
 }
 
 USB_Bulk_Interrupt_Endpoint::USB_Bulk_Interrupt_Endpoint(uint8_t endpoint, uint16_t max_packet_size, uint8_t address, uint8_t hub_addr, uint8_t port, uint8_t speed) :
-USB_Endpoint(endpoint & 0xF, max_packet_size & 0x7FF, hub_addr, port, address, speed), dir_in(endpoint & 0x80) {}
+USB_QH_Endpoint(endpoint & 0xF, max_packet_size & 0x7FF, hub_addr, port, address, speed), dir_in(endpoint & 0x80) {}
 
 int USB_Bulk_Interrupt_Endpoint::message(uint32_t Length, void *buffer, CCallback<usb_bulk_interrupt_transfer>* cb) {
   uint32_t max_length = 4*5*4096 - ((uint32_t)buffer & 0xFFF);
@@ -397,8 +397,8 @@ int USB_Bulk_Interrupt_Endpoint::message(uint32_t Length, void *buffer, CCallbac
   return -1;
 }
 
-USB_Interrupt_Endpoint::USB_Interrupt_Endpoint(uint8_t endpoint, uint16_t max_packet_size, uint8_t address, uint8_t hub_addr, uint8_t port, uint8_t speed, uint32_t i) :
-USB_Bulk_Interrupt_Endpoint(endpoint, max_packet_size, address, hub_addr, port, speed) {
+USB_Interrupt_Endpoint::USB_Interrupt_Endpoint(uint8_t endpoint, uint16_t max_packet_size, uint8_t address, uint8_t hub_addr, uint8_t port, uint8_t speed, uint32_t i)
+: USB_Bulk_Interrupt_Endpoint(endpoint, max_packet_size, address, hub_addr, port, speed) {
   uint32_t maxlen = (capabilities.wMaxPacketSize * 76459) >> 16; // worse case bit stuffing
   if (speed == 2) { // high speed
     capabilities.Mult = 1 + ((max_packet_size & 0x1800) >> 11);
@@ -751,11 +751,11 @@ void USB_Device::USBMessage(const usb_msg_t& msg) {
       deref();
       break;
     case USB_MSG_DEVICE_BULK_TRANSFER:
-      BulkInterruptTransfer(msg.device.bulkintr.bEndpoint, msg.device.bulkintr.dLength, msg.device.bulkintr.data, msg.device.bulkintr.cb, USB_ENDPOINT_BULK);
+      BulkTransfer(msg.device.bulkintr.bEndpoint, msg.device.bulkintr.dLength, msg.device.bulkintr.data, msg.device.bulkintr.cb);
       deref();
       break;
     case USB_MSG_DEVICE_INTERRUPT_TRANSFER:
-      BulkInterruptTransfer(msg.device.bulkintr.bEndpoint, msg.device.bulkintr.dLength, msg.device.bulkintr.data, msg.device.bulkintr.cb, USB_ENDPOINT_INTERRUPT);
+      InterruptTransfer(msg.device.bulkintr.bEndpoint, msg.device.bulkintr.dLength, msg.device.bulkintr.data, msg.device.bulkintr.cb);
       deref();
       break;
     case USB_MSG_DEVICE_CONTROL_TRANSFER:
@@ -835,8 +835,8 @@ void USB_Device::activate_endpoint(const usb_endpoint_descriptor* p) {
       Endpoints[i].ep = new(std::nothrow) USB_Bulk_Interrupt_Endpoint(p->bEndpointAddress, p->wMaxPacketSize, address, hub_addr, port, speed);
       if (Endpoints[i].ep != NULL) {
         Endpoints[i].type = USB_ENDPOINT_BULK;
-        host->activate_endpoint(Endpoints[i].ep, this);
-        return;
+        if (host->activate_endpoint(Endpoints[i].ep, this))
+          return;
       }
       break;
     case USB_ENDPOINT_INTERRUPT:
@@ -844,8 +844,8 @@ void USB_Device::activate_endpoint(const usb_endpoint_descriptor* p) {
       Endpoints[i].ep = new(std::nothrow) USB_Interrupt_Endpoint(p->bEndpointAddress, p->wMaxPacketSize, address, hub_addr, port, speed, p->bInterval);
       if (Endpoints[i].ep != NULL) {
         Endpoints[i].type = USB_ENDPOINT_INTERRUPT;
-        host->activate_endpoint(Endpoints[i].ep, this, true);
-        return;
+        if (host->activate_endpoint(Endpoints[i].ep, this))
+          return;
       }
       break;
     case USB_ENDPOINT_CONTROL:
@@ -853,6 +853,7 @@ void USB_Device::activate_endpoint(const usb_endpoint_descriptor* p) {
       dprintf("Unsupported endpoint type: %02X\n", p->bmAttributes);
       return;
   }
+  dprintf("Failed to activate endpoint %02X for device %p\n", p->bEndpointAddress, this);
   deref();
 }
 
@@ -1111,10 +1112,9 @@ void USB_Device::ControlTransfer(uint8_t bmRequestType, uint8_t bmRequest, uint1
   }
 }
 
-void USB_Device::BulkInterruptTransfer(uint8_t bEndpoint, uint32_t dLength, void *data, CCallback<usb_bulk_interrupt_transfer>* cb, int type) {
-  errno = ENXIO;
-  if (Endpoints[bEndpoint].type==type) {
-    if (Endpoints[bEndpoint].ep->message(dLength, data, cb)==0)
+void USB_Device::BulkInterruptTransfer(uint8_t bEndpoint, uint32_t dLength, void *data, CCallback<usb_bulk_interrupt_transfer>* cb, bool bulk) {
+  if (Endpoints[bEndpoint].type == (bulk ? USB_ENDPOINT_BULK : USB_ENDPOINT_INTERRUPT)) {
+    if (static_cast<USB_Bulk_Interrupt_Endpoint*>(Endpoints[bEndpoint].ep)->message(dLength, data, cb)==0)
       return;
   }
   else errno = ENXIO;
@@ -1578,7 +1578,7 @@ void USB_Host::update_transfers(void) {
   }
 }
 
-void USB_Host::add_async_queue(USB_Endpoint *ep) {
+void USB_Host::add_async_queue(USB_QH_Endpoint *ep) {
   Enum.sync_before_read();
   ep->horizontal_link = Enum.horizontal_link;
   ep->clean_after_write();
@@ -1588,15 +1588,15 @@ void USB_Host::add_async_queue(USB_Endpoint *ep) {
   endpoints = ep;
 }
 
-bool USB_Host::remove_async_queue(USB_Endpoint *ep) {
-  dprintf("Removing async USB_Endpoint %p\n", ep);
+bool USB_Host::remove_async_queue(USB_QH_Endpoint *ep) {
+  dprintf("Removing async USB_QH_Endpoint %p\n", ep);
 
   uint32_t qh = (uint32_t)(static_cast<usb_queue_head_t*>(ep)) | 2;
   usb_queue_head_t* prev = static_cast<usb_queue_head_t*>(&Enum);
   while (prev->horizontal_link != qh) {
     prev = (usb_queue_head_t*)(prev->horizontal_link & ~0x1F);
     if (prev == static_cast<usb_queue_head_t*>(&Enum)) {
-      dprintf("Can't removed USB_Endpoint %p, not found in async list\n", ep);
+      dprintf("Can't removed USB_QH_Endpoint %p, not found in async list\n", ep);
       return false;
     }
   }
@@ -2038,21 +2038,37 @@ void USB_Host::usb_process(void) {
         continue;
       case USB_MSG_ENDPOINT_ACTIVATE:
         msg.endpoint.ep->device = msg.endpoint.device;
-        if (msg.endpoint.periodic == false)
-          add_async_queue(msg.endpoint.ep);
-        else
-          add_periodic_queue(static_cast<USB_Interrupt_Endpoint*>(msg.endpoint.ep));
+        switch (msg.endpoint.ep->endpoint_type()) {
+          case USB_ENDPOINT_INTERRUPT:
+            add_periodic_queue(static_cast<USB_Interrupt_Endpoint*>(msg.endpoint.ep));
+            break;
+          case USB_ENDPOINT_BULK:
+          case USB_ENDPOINT_CONTROL:
+            add_async_queue(static_cast<USB_QH_Endpoint*>(msg.endpoint.ep));
+            break;
+          default:
+            dprintf("Don't know how to activate endpoint %p, type is %d\n", msg.endpoint.ep, msg.endpoint.ep->endpoint_type());
+            notify_endpoint_removed(msg.endpoint.ep);
+            break;
+		}
         continue;
       case USB_MSG_ENDPOINT_DEACTIVATE:
-        if (msg.endpoint.ep->capabilities.s_mask != 0) {
-          if (remove_periodic_queue(static_cast<USB_Interrupt_Endpoint*>(msg.endpoint.ep)) == true)
-            continue;
-        } else if (remove_async_queue(msg.endpoint.ep) == true) {
-          continue;
-        }
-        // else removal could not be queued, send removed message now
-        notify_endpoint_removed(msg.endpoint.ep);
-        continue;
+        switch (msg.endpoint.ep->endpoint_type()) {
+			case USB_ENDPOINT_INTERRUPT:
+              if (remove_periodic_queue(static_cast<USB_Interrupt_Endpoint*>(msg.endpoint.ep)) == true)
+                continue;
+              break;
+			case USB_ENDPOINT_CONTROL:
+			case USB_ENDPOINT_BULK:
+			  if (remove_async_queue(static_cast<USB_QH_Endpoint*>(msg.endpoint.ep)) == true)
+			  	continue;
+			  break;
+			default:
+			  dprintf("Don't know how to deactivate endpoint %p, type is %d\n", msg.endpoint.ep, msg.endpoint.ep->endpoint_type());
+		}
+		// removal could not be queued, send notification now
+		notify_endpoint_removed(msg.endpoint.ep);
+		continue;
       case USB_MSG_DEVICE_INIT:
       case USB_MSG_DEVICE_ENDPOINT_REMOVED:
       case USB_MSG_DEVICE_FIND_DRIVER:
@@ -2068,13 +2084,12 @@ void USB_Host::usb_process(void) {
   dprintf("USB: shutting down\n");
 }
 
-bool USB_Host::activate_endpoint(USB_Endpoint *ep, USB_Device *dev, bool periodic) {
+bool USB_Host::activate_endpoint(USB_Endpoint *ep, USB_Device *dev) {
   usb_msg_t msg = {
     .type = USB_MSG_ENDPOINT_ACTIVATE,
     .endpoint = {
       .ep = ep,
       .device = dev,
-      .periodic = periodic
     }
   };
   return putMessage(msg);
