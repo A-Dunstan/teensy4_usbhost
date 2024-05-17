@@ -399,7 +399,7 @@ int USB_Bulk_Interrupt_Endpoint::message(uint32_t Length, void *buffer, CCallbac
 
 USB_Interrupt_Endpoint::USB_Interrupt_Endpoint(uint8_t endpoint, uint16_t max_packet_size, uint8_t address, uint8_t hub_addr, uint8_t port, uint8_t speed, uint32_t i)
 : USB_Bulk_Interrupt_Endpoint(endpoint, max_packet_size, address, hub_addr, port, speed) {
-  uint32_t maxlen = (capabilities.wMaxPacketSize * 76459) >> 16; // worse case bit stuffing
+  uint32_t maxlen = (((capabilities.wMaxPacketSize+2) * 298) >> 8) + 5+12; // worse case bit stuffing = 7/6ths. Includes CRC16 in bitstuffing plus packet structure
   if (speed == 2) { // high speed
     capabilities.Mult = 1 + ((max_packet_size & 0x1800) >> 11);
     if (i > 16) i = 16;
@@ -407,7 +407,8 @@ USB_Interrupt_Endpoint::USB_Interrupt_Endpoint(uint8_t endpoint, uint16_t max_pa
     if (i > PERIODIC_LIST_SIZE*8)
       i = PERIODIC_LIST_SIZE*8;
     interval = i;
-    stime = ((55 + 32 + maxlen) >> 5) * capabilities.Mult;
+    // IN/OUT, DATA, ACK
+    stime = ((19 + maxlen + 17 + 31) >> 5) * capabilities.Mult;
     ctime = 0;
   } else {
     /* full/low speed interval is in frames
@@ -421,12 +422,13 @@ USB_Interrupt_Endpoint::USB_Interrupt_Endpoint(uint8_t endpoint, uint16_t max_pa
       }
     }
     interval = i << 3;
-    if (endpoint & 0x80) {
-      stime = (40 + 32) >> 5;
-      ctime = (70 + 32 + maxlen) >> 5;
-    } else {
-      stime = (100 + 32 + maxlen) >> 5;
-      ctime = (55 + 32) >> 5;
+    // SSPLIT and CSPLIT use 4 byte tokens, one byte larger than IN/OUT
+    if (endpoint & 0x80) { // IN
+      stime = (20 + 16 + 31) >> 5;           // S-SPLIT, Full/Low IN
+      ctime = (20 + 16 + maxlen + 31) >> 5;  // C-SPLIT, Full/Low IN, DATA
+    } else { // OUT
+      stime = (20 + 16 + maxlen + 31) >> 5; // S-SPLIT, Full/Low OUT, DATA
+      ctime = (20 + 16 + 17 + 31) >> 5;           // C-SPLIT, Full/Low OUT, ACK
     }
   }
 }
