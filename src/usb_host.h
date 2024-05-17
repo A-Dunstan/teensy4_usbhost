@@ -453,6 +453,8 @@ public:
 protected:
   USB_Driver();
   void setDevice(USB_Device *d) {device = d;}
+  // return a const pointer so it can only be compared, not accessed
+  const USB_Device* getDevice(void) { return device; }
   // asynchronous
   int ControlMessage(uint8_t bmRequestType, uint8_t bmRequest, uint16_t wValue, uint16_t wIndex, uint16_t wLength, void *data, const std::function<void(int)> &);
   int BulkMessage(uint8_t bEndpoint, uint32_t dLength, void *data, const std::function<void(int)> &);
