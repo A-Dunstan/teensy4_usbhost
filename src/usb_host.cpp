@@ -100,14 +100,21 @@ void USB_Endpoint::update(void) {
       // unhalt the queue, resume processing
       sync_before_read();
       overlay.next = t->next;
+      sync_after_write();
       overlay.token.status = 0; // clear halt, reset DT
       clean_after_write();
       pending = static_cast<usb_transfer*>(t->next);
     } else {
       ret = t->token.total;
-      if (ret && IS_QTD_PTR_VALID(t->alt))
+      if (ret && IS_QTD_PTR_VALID(t->alt)) {
         pending = static_cast<usb_transfer*>(t->alt);
-      else
+        while (t->cb == NULL) {
+			usb_transfer *n = static_cast<usb_transfer*>(t->next);
+			delete t;
+			ret += n->token.total;
+			t = n;
+		}
+      } else
         pending = static_cast<usb_transfer*>(t->next);
     }
 
@@ -322,13 +329,6 @@ int USB_Control_Endpoint::message(uint8_t bmRequestType, uint8_t bmRequest, uint
 
 void USB_Bulk_Interrupt_Endpoint::transfer::callback(usb_transfer *t, int result) {
   if (result >= 0 && dlength) {
-    if (t-token.IOC == 0) {
-      // short transfer in non-final usb transfer, carry it forward
-      usb_transfer *n = static_cast<usb_transfer*>(t->next);
-      callback(n, result + n->token.total);
-      delete n;
-      return;
-    }
     result = dlength - result;
     if (dir_in)
       cache_invalidate(buffer, result);
