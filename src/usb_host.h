@@ -164,12 +164,12 @@ private:
   void clean_after_write(void);
 
   void update(void);
-  void flush(void);
   
 protected:
   USB_Endpoint(uint8_t endpoint, uint16_t max_packet_size, uint8_t hub, uint8_t port, uint8_t address, uint8_t speed);
   bool enqueue_transfer(usb_transfer* head);
 public:
+  void flush(void);
   ~USB_Endpoint();
 };
 

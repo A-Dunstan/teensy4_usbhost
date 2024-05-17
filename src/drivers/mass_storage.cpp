@@ -197,16 +197,15 @@ USB_Storage* USB_Storage::open_device(size_t index) {
 
 void USB_Storage::reset(void) {
 	const uint8_t bmrtReset = USB_CTRLTYPE_DIR_HOST2DEVICE|USB_CTRLTYPE_TYPE_CLASS|USB_CTRLTYPE_REC_INTERFACE;
-	const uint8_t bmrtClearHalt = USB_CTRLTYPE_DIR_HOST2DEVICE|USB_CTRLTYPE_TYPE_STANDARD|USB_CTRLTYPE_REC_ENDPOINT;
 
 	// bulk storage reset
 	ControlMessage(bmrtReset, USBMS_REQ_RESET, 0, interface, 0, NULL);
 	delay(100);
 	// clear HALT on IN endpoint
-	ControlMessage(bmrtClearHalt, USB_REQ_CLEAR_FEATURE, USB_FEATURE_ENDPOINT_HALT, bulk_in, 0, NULL);
+	ControlMessage(USB_REQTYPE_ENDPOINT_SET, USB_REQ_CLEAR_FEATURE, USB_FEATURE_ENDPOINT_HALT, bulk_in, 0, NULL);
 	delay(100);
 	// clear HALT on OUT endpoint
-	ControlMessage(bmrtClearHalt, USB_REQ_CLEAR_FEATURE, USB_FEATURE_ENDPOINT_HALT, bulk_out, 0, NULL);
+	ControlMessage(USB_REQTYPE_ENDPOINT_SET, USB_REQ_CLEAR_FEATURE, USB_FEATURE_ENDPOINT_HALT, bulk_out, 0, NULL);
 	delay(100);
 }
 
@@ -287,6 +286,12 @@ int USB_Storage::scsi_cmd(uint8_t lun, void* data, size_t length, const uint8_t*
 	// receive CSW
 	if (csw_tofetch) {
 		ret = BulkMessage(bulk_in, csw_tofetch, xfer.buf+sizeof(ms_csw)-csw_tofetch);
+		if (ret<0 && errno==EPIPE) {
+			// endpoint stalled, probably the device letting us know the data stage returned less than expected
+			ControlMessage(USB_REQTYPE_ENDPOINT_SET, USB_REQ_CLEAR_FEATURE, USB_FEATURE_ENDPOINT_HALT, bulk_in, 0, NULL);
+			delay(100);
+			ret = BulkMessage(bulk_in, csw_tofetch, xfer.buf+sizeof(ms_csw)-csw_tofetch);
+		}
 		if (ret < csw_tofetch) {
 			if (ret >= 0)
 				errno = EPROTO;

@@ -141,9 +141,9 @@ void USB_Endpoint::flush(void) {
   // get rid of any pending transfers
   dprintf("Endpoint %p flush\n", this);
   sync_before_read();
-  overlay.token.status = 0;
   overlay.alt = QTD_PTR_INVALID;
   overlay.next = dummy;
+  overlay.token.val = 0; // reset dt to zero
   clean_after_write();
 
   usb_transfer *t = pending;
@@ -667,6 +667,25 @@ void USB_Device::callback(usb_control_transfer *t, int result) {
         control.message(USB_REQTYPE_INTERFACE_GET, USB_REQ_GET_INTERFACE, 0, t->getwIndex(), 1, NULL, this);
       }
       return;
+    case MK_BE16(USB_REQTYPE_ENDPOINT_SET, USB_REQ_CLEAR_FEATURE):
+      if (t->getwValue() == USB_FEATURE_ENDPOINT_HALT) {
+        if (result >= 0) {
+		  uint8_t endpoint = t->getwIndex();
+		  dprintf("HALT was cleared for endpoint %02X\n", endpoint);
+		  // data toggle must be reset in queue head
+		  if (endpoint & 0x7F) {
+			  if (endpoint & 0x80) endpoint = endpoint - 0x80 + 15 - 1;
+			  else --endpoint;
+			  int ep_type = Endpoints[endpoint].type;
+			  if (ep_type == USB_ENDPOINT_INTERRUPT || ep_type == USB_ENDPOINT_BULK) {
+				  Endpoints[endpoint].ep->flush();
+			  }
+		  }
+		}
+		else dprintf("Clearing endpoint halt failed\n");
+		return;
+	  }
+	  break;
   }
 
   dprintf("USB_Device<%p>: unknown control request or failure (%d), bmRequestType %02X bmRequest %02X wValue %04X\n", this, result, t->getbmRequestType(), t->getbmRequest(), t->getwValue());
@@ -1072,6 +1091,15 @@ void USB_Device::ControlTransfer(uint8_t bmRequestType, uint8_t bmRequest, uint1
     case MK_BE16(USB_REQTYPE_INTERFACE_GET, USB_REQ_GET_INTERFACE):
     case MK_BE16(USB_REQTYPE_INTERFACE_SET, USB_REQ_SET_INTERFACE):
       proxy = true;
+      break;
+    case MK_BE16(USB_REQTYPE_ENDPOINT_SET, USB_REQ_CLEAR_FEATURE):
+      if (wValue == USB_FEATURE_ENDPOINT_HALT) {
+        if (wIndex == 0) { // CLEAR_HALT is invalid for endpoint 0
+		  drv_cb->callback(NULL, -EINVAL);
+		  return;
+		}
+		proxy = true;
+	  }
       break;
   }
 
