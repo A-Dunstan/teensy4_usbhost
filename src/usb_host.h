@@ -412,6 +412,11 @@ typedef struct {
     struct {
       class USB_Device *dev;
       union {
+        void *cb;
+        CCallback<usb_control_transfer>* control_cb;
+        CCallback<usb_bulk_interrupt_transfer>* bulkintr_cb;
+      };
+      union {
         USB_Endpoint *endpoint;
         struct {
           uint8_t bmRequestType;
@@ -420,13 +425,11 @@ typedef struct {
           uint16_t wIndex;
           uint16_t wLength;
           void* data;
-          CCallback<usb_control_transfer>* cb;
         } control;
         struct {
           uint8_t bEndpoint;
           uint32_t dLength;
           void* data;
-          CCallback<usb_bulk_interrupt_transfer>* cb;
         } bulkintr;
       };
     } device;

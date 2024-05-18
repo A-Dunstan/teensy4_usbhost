@@ -757,15 +757,15 @@ void USB_Device::USBMessage(const usb_msg_t& msg) {
       deref();
       break;
     case USB_MSG_DEVICE_BULK_TRANSFER:
-      BulkTransfer(msg.device.bulkintr.bEndpoint, msg.device.bulkintr.dLength, msg.device.bulkintr.data, msg.device.bulkintr.cb);
+      BulkTransfer(msg.device.bulkintr.bEndpoint, msg.device.bulkintr.dLength, msg.device.bulkintr.data, msg.device.bulkintr_cb);
       deref();
       break;
     case USB_MSG_DEVICE_INTERRUPT_TRANSFER:
-      InterruptTransfer(msg.device.bulkintr.bEndpoint, msg.device.bulkintr.dLength, msg.device.bulkintr.data, msg.device.bulkintr.cb);
+      InterruptTransfer(msg.device.bulkintr.bEndpoint, msg.device.bulkintr.dLength, msg.device.bulkintr.data, msg.device.bulkintr_cb);
       deref();
       break;
     case USB_MSG_DEVICE_CONTROL_TRANSFER:
-      ControlTransfer(msg.device.control.bmRequestType, msg.device.control.bmRequest, msg.device.control.wValue, msg.device.control.wIndex, msg.device.control.wLength, msg.device.control.data, msg.device.control.cb);
+      ControlTransfer(msg.device.control.bmRequestType, msg.device.control.bmRequest, msg.device.control.wValue, msg.device.control.wIndex, msg.device.control.wLength, msg.device.control.data, msg.device.control_cb);
       deref();
       break;
     default:
@@ -1205,88 +1205,65 @@ public:
   DriverCallback(const std::function<void(int)> &_rfunc) : rfunc(_rfunc) {}
 };
 
-int USB_Driver::ControlMessage(uint8_t bmRequestType, uint8_t bmRequest, uint16_t wValue, uint16_t wIndex, uint16_t wLength, void *data, const std::function<void(int)> &cb_func) {
-  if (device == NULL) {
-    errno = ENOENT;
-  } else {
-    DriverCallback<usb_control_transfer> *cb = new(std::nothrow) DriverCallback<usb_control_transfer>(cb_func);
+template<class transfer_type>
+static int DriverMessage(usb_msg_t &msg, const std::function<void(int)> &cb_func, USB_Device *device) {
+  if (device == NULL) errno = ENOENT;
+  else {
+    DriverCallback<transfer_type> *cb = new(std::nothrow) DriverCallback<transfer_type>(cb_func);
     if (cb != NULL) {
-      usb_msg_t msg = {
-        .type = USB_MSG_DEVICE_CONTROL_TRANSFER,
-        .device = {
-          .control = {
-            .bmRequestType = bmRequestType,
-            .bmRequest = bmRequest,
-            .wValue = wValue,
-            .wIndex = wIndex,
-            .wLength = wLength,
-            .data = data,
-            .cb = cb
-          }
-        }
-      };
+      msg.device.cb = cb;
       if (device->pushMessage(msg))
         return 0;
       delete cb;
-    } else {
-      errno = ENOMEM;
-    }
+	}
+	errno = ENOMEM;
   }
   return -1;
+}
+
+int USB_Driver::ControlMessage(uint8_t bmRequestType, uint8_t bmRequest, uint16_t wValue, uint16_t wIndex, uint16_t wLength, void *data, const std::function<void(int)> &cb_func) {
+  usb_msg_t msg = {
+    .type = USB_MSG_DEVICE_CONTROL_TRANSFER,
+    .device = {
+      .control = {
+        .bmRequestType = bmRequestType,
+        .bmRequest = bmRequest,
+        .wValue = wValue,
+        .wIndex = wIndex,
+        .wLength = wLength,
+        .data = data
+	  }
+	}
+  };
+  return DriverMessage<usb_control_transfer>(msg, cb_func, device);
 }
 
 int USB_Driver::BulkMessage(uint8_t bEndpoint, uint32_t dLength, void *data, const std::function<void(int)> &cb_func) {
-  if (device == NULL) {
-    errno = ENOENT;
-  } else {
-    DriverCallback<usb_bulk_interrupt_transfer> *cb = new(std::nothrow) DriverCallback<usb_bulk_interrupt_transfer>(cb_func);
-    if (cb != NULL) {
-      usb_msg_t msg = {
-        .type = USB_MSG_DEVICE_BULK_TRANSFER,
-        .device = {
-          .bulkintr = {
-            .bEndpoint = bEndpoint,
-            .dLength = dLength,
-            .data = data,
-            .cb = cb
-          }
-        }
-      };
-      if (device->pushMessage(msg))
-        return 0;
-      delete cb;
-    } else  {
-      errno = ENOMEM;
-    }
-  }
-  return -1;
+  usb_msg_t msg = {
+    .type = USB_MSG_DEVICE_BULK_TRANSFER,
+    .device = {
+      .bulkintr = {
+        .bEndpoint = bEndpoint,
+        .dLength = dLength,
+        .data = data
+	  }
+	}
+  };
+  return DriverMessage<usb_bulk_interrupt_transfer>(msg, cb_func, device);
 }
 
 int USB_Driver::InterruptMessage(uint8_t bEndpoint, uint16_t wLength, void *data, const std::function<void(int)> &cb_func) {
-  if (device == NULL) {
-    errno = ENOENT;
-  } else {
-    DriverCallback<usb_bulk_interrupt_transfer> *cb = new(std::nothrow) DriverCallback<usb_bulk_interrupt_transfer>(cb_func);
-    if (cb != NULL) {
-      usb_msg_t msg = {
-        .type = USB_MSG_DEVICE_INTERRUPT_TRANSFER,
-        .device = {
-          .bulkintr = {
-            .bEndpoint = bEndpoint,
-            .dLength = wLength,
-            .data = data,
-            .cb = cb
-          }
-        }
-      };
-      if (device->pushMessage(msg))
-        return 0;
-      delete cb;
-    } else {
-      errno = ENOMEM;
-    }
-  }
-  return -1;
+  usb_msg_t msg = {
+    .type = USB_MSG_DEVICE_INTERRUPT_TRANSFER,
+    .device = {
+      .bulkintr = {
+        .bEndpoint = bEndpoint,
+        .dLength = wLength,
+        .data = data
+	  }
+	}
+  };
+  return DriverMessage<usb_bulk_interrupt_transfer>(msg, cb_func, device);
 }
 
 // synchronous functions - not implemented here, these use weak symbols so they can be overridden using OS specific code
