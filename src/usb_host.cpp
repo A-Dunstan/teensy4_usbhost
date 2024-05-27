@@ -1848,11 +1848,11 @@ void USB_Host::unschedule_periodic(void) {
         // assumes s_mask and c_mask don't overlap
         if (s_mask & (1<<u)) {
           uframe_bandwidth[offset*8+u] -= stime;
-          dprintf("bandwidth[%lu] = %u\n", offset*8+u, uframe_bandwidth[offset*8+u]);
+          dprintf("bandwidth[%u:%u] = %u\n", offset, u, uframe_bandwidth[offset*8+u]);
         }
         if (c_mask & (1<<u)) {
           uframe_bandwidth[offset*8+u] -= ctime;
-          dprintf("bandwidth[%lu] = %u\n", offset*8+u, uframe_bandwidth[offset*8+u]);
+          dprintf("bandwidth[%u:%u] = %u\n", offset, u, uframe_bandwidth[offset*8+u]);
         }
       }
     }
@@ -1880,7 +1880,6 @@ void USB_Host::add_periodic_queue(USB_Periodic_Endpoint *ep) {
   uint32_t link_to = ep->link_to;
   uint8_t stime = ep->stime;
   uint8_t ctime = ep->ctime;
-  uint8_t ep_type = ep->ep_type;
 
   /* use the interval and offset to insert the endpoint into the periodic schedule,
     * and s_mask+c_mask to update uframe_bandwidth

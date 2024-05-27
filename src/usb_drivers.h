@@ -9,3 +9,7 @@
 #ifdef USE_MASS_STORAGE_FAT
 #include "drivers/mass_storage_fat.h"
 #endif
+
+#ifdef USE_MOUSE
+#include "drivers/mouse.h"
+#endif
