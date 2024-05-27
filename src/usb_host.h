@@ -82,33 +82,33 @@ typedef union {
 
 // ISOCHRONOUS (HIGH-SPEED) TRANSFER DESCRIPTOR: FIXED LAYOUT (64-BYTE ALIGNED)
 typedef struct __attribute__((aligned(64))) usb_iTD_t {
-	uint32_t horizontal_link;
-	struct {
-		uint32_t offset:12;
-		uint32_t PG:3;
-		uint32_t IOC:1;
-		uint32_t total:12;
-		uint32_t status:4;
-	} transfers[8];
+  uint32_t horizontal_link;
+  struct {
+    uint32_t offset:12;
+    uint32_t PG:3;
+    uint32_t IOC:1;
+    uint32_t total:12;
+    uint32_t status:4;
+  } transfers[8];
 
-	uint32_t address:7;
-	uint32_t :1;
-	uint32_t endpt:4;
-	uint32_t page0:20;
-	uint32_t wMaxPacketSize:11;
-	uint32_t dir:1;
-	uint32_t page1:20;
-	uint32_t Mult:2;
-	uint32_t :10;
-	uint32_t page2:20;
-	uint32_t :12;
-	uint32_t page3:20;
-	uint32_t :12;
-	uint32_t page4:20;
-	uint32_t :12;
-	uint32_t page5:20;
-	uint32_t :12;
-	uint32_t page6:20;
+  uint32_t address:7;
+  uint32_t :1;
+  uint32_t endpt:4;
+  uint32_t page0:20;
+  uint32_t wMaxPacketSize:11;
+  uint32_t dir:1;
+  uint32_t page1:20;
+  uint32_t Mult:2;
+  uint32_t :10;
+  uint32_t page2:20;
+  uint32_t :12;
+  uint32_t page3:20;
+  uint32_t :12;
+  uint32_t page4:20;
+  uint32_t :12;
+  uint32_t page5:20;
+  uint32_t :12;
+  uint32_t page6:20;
 } usb_iTD_t;
 
 // SPLIT-TRANSACTION ISOCHRONOUS TRANSACTION DESCRIPTOR: FIXED LAYOUT (32-BYTE ALIGNED)
@@ -450,8 +450,8 @@ private:
   std::atomic_uint refcount;
 
   struct Endpoint_Elem {
-	  USB_Endpoint *ep;
-	  int type;
+    USB_Endpoint *ep;
+    int type;
   };
 
   class Endpoint_Array {
@@ -466,8 +466,8 @@ private:
         else if (ep_addr & 0x80) index += 15;
       }
       return eps[index];
-	}
-	Endpoint_Array() {
+  }
+  Endpoint_Array() {
       for (size_t i=0; i < sizeof(eps)/sizeof(eps[0]); i++) {
         eps[i].ep = NULL;
         eps[i].type = -1;

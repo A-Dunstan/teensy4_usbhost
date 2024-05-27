@@ -95,32 +95,32 @@ void serial::calculate_baud(uint32_t baud) {
   // pre is a bitmask of three bits which disable separate prescalers of 8, 64, and 2
   // (applied to the base USB clock of 12MHz)
   static const struct { unsigned char pre; float scale; } scalers[] = {
-	  {7, 1.0f},
-	  {3, 2.0f},
-	  {6, 8.0f},
-	  {2, 16.0f},
-	  {5, 64.0f},
-	  {1, 128.0f},
-	  {4, 512.0f},
-	  {0, 1024.0f}
+    {7, 1.0f},
+    {3, 2.0f},
+    {6, 8.0f},
+    {2, 16.0f},
+    {5, 64.0f},
+    {1, 128.0f},
+    {4, 512.0f},
+    {0, 1024.0f}
   };
 
   size_t i=0;
   do {
-	  b = scalers[i].pre;
-	  c = 12000000.0f / scalers[i].scale;
-	  i++;
-	  a = floor(c / baud);
+    b = scalers[i].pre;
+    c = 12000000.0f / scalers[i].scale;
+    i++;
+    a = floor(c / baud);
   } while (b && a > 256);
 
   // factors <= 8 without a prescaler need to be halved
   if (a <= 8 && b==7) {
-	  c = 6000000.0f;
-	  a >>= 1;
+    c = 6000000.0f;
+    a >>= 1;
   }
 
   if ((c / a - baud) > (baud - c / (a + 1)))
-	a++;
+  a++;
   a = 256 - a;
 
   factor = (unsigned char)a;

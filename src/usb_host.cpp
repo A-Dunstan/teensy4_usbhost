@@ -802,21 +802,21 @@ void USB_Device::search_for_drivers(void) {
   bool activated = false;
   dev_config& c = (*(configs.begin())).second;
   for (unsigned int i=0; i < 256; i++) {
-	  size_t l;
-	  const dev_interface *di = c.interface(i);
-	  if (di == NULL) break;
-	  const usb_interface_descriptor *iface = di->getInterface(l, 0);
-	  USB_Driver::Factory *f = USB_Driver::Factory::find_driver(iface, l);
-	  if (f != NULL) {
-		  if (!activated) {
-			  activate_configuration((*(configs.begin())).first);
-			  activated = true;
-		  }
-		  USB_Driver *d = f->attach(iface, l, this);
-		  if (d) {
-			  drivers.push_back(d);
-		  }
-	  }
+    size_t l;
+    const dev_interface *di = c.interface(i);
+    if (di == NULL) break;
+    const usb_interface_descriptor *iface = di->getInterface(l, 0);
+    USB_Driver::Factory *f = USB_Driver::Factory::find_driver(iface, l);
+    if (f != NULL) {
+      if (!activated) {
+        activate_configuration((*(configs.begin())).first);
+        activated = true;
+      }
+      USB_Driver *d = f->attach(iface, l, this);
+      if (d) {
+        drivers.push_back(d);
+      }
+    }
   }
 }
 

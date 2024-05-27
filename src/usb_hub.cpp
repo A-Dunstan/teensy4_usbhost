@@ -1,4 +1,4 @@
-#include "usb_host.h"
+#include <usb_host.h>
 
 #include <cstring>
 
@@ -36,7 +36,8 @@ public:
   static USB_Driver* attach_config(const usb_device_descriptor*,const usb_configuration_descriptor*,USB_Device*);
 };
 
-USB_Hub_Driver::USB_Hub_Driver(USB_Device *d, uint8_t status) : USB_Driver_FactoryGlue<USB_Hub_Driver>(d),
+USB_Hub_Driver::USB_Hub_Driver(USB_Device *d, uint8_t status) :
+USB_Driver_FactoryGlue<USB_Hub_Driver>(d),
 USB_Hub(d->speed==2 ? d->address : d->hub_addr),dev(d),status_ep(status),hs_port(d->speed==2 ? 16 : d->port) {
   refcount = 1;
   // get the hub descriptor
@@ -76,7 +77,7 @@ bool USB_Hub_Driver::offer_config(const usb_device_descriptor *d, const usb_conf
   // find first interface descriptor
   const uint8_t *b = (const uint8_t*)(c+1);
   while (b[1] != USB_DT_INTERFACE) b += b[0];
-  
+
   const usb_interface_descriptor *i = (const usb_interface_descriptor*)b;
   if (i->bDescriptorType != USB_DT_INTERFACE)
     return false;
