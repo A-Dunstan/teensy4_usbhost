@@ -26,19 +26,23 @@ static uint8_t CD_LUN;
  * connect CDROM SPDIF data to diode cathode (e.g. 1N9148), connect anode to Teensy pin 15 (SPDIF in)
  * SPDIF data on the CDROM is the outer pin, GND is the pin closer to the center
  */
+#ifdef AUDIO_INTERFACE
 AsyncAudioInputSPDIF3 spdifIn;
 AudioOutputUSB usbAudioOut;
 AudioConnection patchCord1(spdifIn, 0, usbAudioOut, 0);
 AudioConnection patchCode2(spdifIn, 1, usbAudioOut, 1);
+#endif
 
 static void prompt(void) {
     Serial.print("\nEnter command (? for available commands): ");
 }
 
 void setup() {
+#ifdef AUDIO_INTERFACE
   // configure pin 15 (SPDIF IN) for PULLUP
   IOMUXC_SW_PAD_CTL_PAD_GPIO_AD_B1_03 = IOMUXC_PAD_DSE(7) | IOMUXC_PAD_PKE | IOMUXC_PAD_PUE | IOMUXC_PAD_PUS(3) | IOMUXC_PAD_HYS;
   AudioMemory(12);
+#endif
 
   Serial.begin(0);
   elapsedMillis stimer;
@@ -199,8 +203,9 @@ static uint32_t read_toc(uint8_t track) {
       length -= 4;
       for (int i=0; i<=100 && length>=8; i++,length -= 8) {
         uint32_t address = __builtin_bswap32(toc.track[i].address);
-        Serial.printf("Track %d: ADR %X, Control %X, LBA: %u\n", toc.track[i].track_number, \
-          toc.track[i].adr, toc.track[i].control, address);
+        if (toc.track[i].track_number == 0xAA) Serial.print("LEADOUT: ");
+        else Serial.printf("Track %d: ", toc.track[i].track_number);
+        Serial.printf("ADR %X, Control %X, LBA: %u\n", toc.track[i].adr, toc.track[i].control, address);
         if (track == toc.track[i].track_number) return address;
       }
     }
@@ -326,9 +331,11 @@ void loop() {
   Serial.println((char)c);
 
   switch (c) {
+#ifdef AUDIO_INTERFACE
     case 'a':
       Serial.printf("SPDIF Samplerate: %f (%s)\n", spdifIn.getInputFrequency(), spdifIn.isLocked() ? "LOCKED" : "UNLOCKED");
       break;
+#endif
     case 'z':
       mem_stats();
       break;
