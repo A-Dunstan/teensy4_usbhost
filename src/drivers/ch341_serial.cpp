@@ -185,8 +185,7 @@ void serial::status_callback(int result) {
 
 void serial::get_status(void) {
   if (attached) {
-    const auto fn = std::bind(&serial::status_callback, this, std::placeholders::_1);
-    InterruptMessage(ep_status, sizeof(status_in), status_in, fn);
+    InterruptMessage(ep_status, sizeof(status_in), status_in, &status_cb);
   }
 }
 
@@ -206,7 +205,7 @@ void serial::queue_read(uint8_t *buf) {
     do {
       uint32_t to_read = (uint32_t)read_buf.availableForWrite();
       if (started && to_read) {
-        const auto fn = std::bind(&serial::read_callback, this, std::placeholders::_1, buf);
+        USBCallback fn( [=](int r) {read_callback(r, buf);} );
         if (to_read > sizeof(data_in[0])) to_read = sizeof(data_in[0]);
         if (BulkMessage(ep_in, to_read, buf, fn) >= 0) {
           break;
@@ -236,7 +235,7 @@ void serial::set_dtr_rts(uint8_t new_status) {
   new_status &= CH341_STATUS_DTR|CH341_STATUS_RTS;
   if (hw_flow) new_status |= CH341_STATUS_RTS;
   if (attached && new_status != out_status) {
-    const auto fn = std::bind(&serial::dtr_rts_callback, this, std::placeholders::_1, out_status, new_status);
+    USBCallback fn( [=](int r) { dtr_rts_callback(r, out_status, new_status);} );
     if (ControlMessage(CH341_CONTROL_OUT, CH341_REQ_MODEM_CTRL, ~new_status, 0, 0, NULL, fn) >= 0)
       out_status = new_status;
   }
@@ -268,7 +267,7 @@ void serial::start(void) {
 
 void serial::init(int result, unsigned int stage) {
   dprintf("ch341::serial::init stage %u result %d\n", stage, result);
-  const auto fn = std::bind(&serial::init, this, std::placeholders::_1, stage+1);
+  USBCallback fn( [=,nextstage=stage+1](int r) { init(r, nextstage);} );
 
   if (result < 0) return;
 
@@ -552,7 +551,7 @@ void serial::flush(void) {
     if (started) {
       sendTimer.end();
       if (tx_buf[0] && tx_length>0) {
-        const auto fn = std::bind(&serial::write_callback, this, std::placeholders::_1, tx_buf[0]);
+        USBCallback fn( [=,buf=tx_buf[0]] (int r) {write_callback(r, buf);} );
         if (BulkMessage(ep_out, tx_length, tx_buf[0], fn) < 0) {
           // failed to send - nothing we can do now, buffer will be discarded
           dprintf("Failed to flush CH341 output buffer\n");

@@ -66,7 +66,7 @@ void usb_queue_head_t::clean_after_write(void) {
   cache_flush_invalidate(this, sizeof(usb_queue_head_t));
 }
 
-void USB_QH_Endpoint::update(void) {
+void QH_Base::update(void) {
   while (pending != dummy) {
     int ret = 0;
     usb_transfer* t = pending;
@@ -109,11 +109,11 @@ void USB_QH_Endpoint::update(void) {
       if (ret && IS_QTD_PTR_VALID(t->alt)) {
         pending = static_cast<usb_transfer*>(t->alt);
         while (t->cb == NULL) {
-			usb_transfer *n = static_cast<usb_transfer*>(t->next);
-			delete t;
-			ret += n->token.total;
-			t = n;
-		}
+      usb_transfer *n = static_cast<usb_transfer*>(t->next);
+      delete t;
+      ret += n->token.total;
+      t = n;
+    }
       } else
         pending = static_cast<usb_transfer*>(t->next);
     }
@@ -128,7 +128,7 @@ void USB_QH_Endpoint::update(void) {
   }
 }
 
-USB_QH_Endpoint::~USB_QH_Endpoint() {
+QH_Base::~QH_Base() {
   // this endpoint has been removed from the async or periodic schedule and won't process any more transfers
   dprintf("Endpoint %p cleanup\n", this);
   active = false;
@@ -144,7 +144,7 @@ USB_QH_Endpoint::~USB_QH_Endpoint() {
   delete t;
 }
 
-void USB_QH_Endpoint::flush(void) {
+void QH_Base::flush(void) {
   // get rid of any pending transfers
   dprintf("Endpoint %p flush\n", this);
   sync_before_read();
@@ -165,8 +165,8 @@ void USB_QH_Endpoint::flush(void) {
 
 }
 
-USB_QH_Endpoint::USB_QH_Endpoint(uint8_t endpoint, uint16_t max_packet_size, uint8_t hub, uint8_t port, uint8_t address, uint8_t speed) {
-  dummy = new usb_transfer;
+QH_Base::QH_Base(uint8_t endpoint, uint16_t max_packet_size, uint8_t hub, uint8_t port, uint8_t address, uint8_t speed) {
+  dummy = new(std::nothrow) usb_transfer;
   dummy->token.status = 0x40; // halt
   dummy->sync_after_write();
   pending = dummy;
@@ -199,7 +199,7 @@ USB_QH_Endpoint::USB_QH_Endpoint(uint8_t endpoint, uint16_t max_packet_size, uin
   active = true;
 }
 
-bool USB_QH_Endpoint::enqueue_transfer(usb_transfer* head) {
+bool QH_Base::enqueue_transfer(usb_transfer* head) {
   if (!active) {
     errno = ENODEV;
     return false;
@@ -237,7 +237,7 @@ uint64_t usb_control_transfer::getSetupData(void) const {
   return MK_SETUP64(req.bmRequestType, req.bmRequest, req.wValue, req.wIndex, req.wLength);
 }
 
-void USB_Control_Endpoint::transfer::callback(usb_transfer*, int result) {
+void USB_Control_Endpoint::transfer::callback(const usb_transfer*, int result) {
   if (result >= 0 && req.wLength) {
     result = req.wLength - data.token.total;
     if (req.bmRequestType & USB_CTRLTYPE_DIR_DEVICE2HOST)
@@ -273,12 +273,12 @@ void *_buffer, CCallback<usb_control_transfer>* _cb, bool release_mem) : cb(_cb)
 }
 
 USB_Control_Endpoint::USB_Control_Endpoint(uint8_t max_packet_size, uint8_t address, uint8_t hub, uint8_t port, uint8_t speed) :
-USB_QH_Endpoint(0, max_packet_size, hub, port, address, speed) {
+USB_QH_Endpoint(0, max_packet_size, hub, port, address, speed, USB_ENDPOINT_CONTROL) {
   if (speed < 2) capabilities.C = 1;
   capabilities.DTC = 1;
 }
 
-int USB_Control_Endpoint::message(uint8_t bmRequestType, uint8_t bmRequest, uint16_t wValue, uint16_t wIndex, uint16_t wLength, void *buffer, CCallback<usb_control_transfer>* cb) {
+int USB_Control_Endpoint::Transfer(uint8_t bmRequestType, uint8_t bmRequest, uint16_t wValue, uint16_t wIndex, uint16_t wLength, void *buffer, CCallback<usb_control_transfer>* cb) {
   bool dyn_mem = false;
 
   if (wLength) {
@@ -327,16 +327,16 @@ int USB_Control_Endpoint::message(uint8_t bmRequestType, uint8_t bmRequest, uint
   return -1;
 }
 
-void USB_Bulk_Interrupt_Endpoint::transfer::callback(usb_transfer *t, int result) {
+void usb_bulk_interrupt_transfer::callback(const usb_transfer *t, int result) {
   if (result >= 0 && dlength) {
     result = dlength - result;
     if (dir_in)
       cache_invalidate(buffer, result);
   }
-  cbi->callback(this, result);
+  (*cbi)(result);
 }
 
-USB_Bulk_Interrupt_Endpoint::transfer::transfer(bool _dir_in, uint32_t length, void *_buffer, CCallback<usb_bulk_interrupt_transfer>* _cb) :
+usb_bulk_interrupt_transfer::usb_bulk_interrupt_transfer(bool _dir_in, uint32_t length, void *_buffer, const USBCallback* _cb) :
 cbi(_cb) {
   buffer = _buffer;
   dlength = length;
@@ -375,21 +375,17 @@ cbi(_cb) {
   }
 }
 
-USB_Bulk_Interrupt_Endpoint::USB_Bulk_Interrupt_Endpoint(uint8_t endpoint, uint16_t max_packet_size, uint8_t address, uint8_t hub_addr, uint8_t port, uint8_t speed) :
-USB_QH_Endpoint(endpoint & 0xF, max_packet_size & 0x7FF, hub_addr, port, address, speed), dir_in(endpoint & 0x80) {}
-
-int USB_Bulk_Interrupt_Endpoint::message(uint32_t Length, void *buffer, CCallback<usb_bulk_interrupt_transfer>* cb) {
+int QH_Base::BulkIntrTransfer(bool dir_in, uint32_t Length, void *buffer, const USBCallback* cb) {
   uint32_t max_length = 4*5*4096 - ((uint32_t)buffer & 0xFFF);
   if (Length > max_length) {
     dprintf("bulk_interrupt transfer too big\n");
     errno = E2BIG;
   } else {
-    transfer *msg = new(std::nothrow) transfer(dir_in, Length, buffer, cb);
+    usb_transfer *msg = new(std::nothrow) usb_bulk_interrupt_transfer(dir_in, Length, buffer, cb);
     if (msg == NULL) {
       errno = ENOMEM;
     } else {
-//      dprintf("bulk_interrupt %p\n", static_cast<usb_qTD_t*>(msg));
-      if (enqueue_transfer(msg) == true)
+      if (enqueue_transfer(msg) == true) // why is the qualified name required here?
         return 0;
       delete msg;
     }
@@ -398,18 +394,21 @@ int USB_Bulk_Interrupt_Endpoint::message(uint32_t Length, void *buffer, CCallbac
 }
 
 USB_Interrupt_Endpoint::USB_Interrupt_Endpoint(uint8_t endpoint, uint16_t max_packet_size, uint8_t address, uint8_t hub_addr, uint8_t port, uint8_t speed, uint32_t i)
-: USB_Bulk_Interrupt_Endpoint(endpoint, max_packet_size, address, hub_addr, port, speed) {
-  uint32_t maxlen = (((capabilities.wMaxPacketSize+2) * 298) >> 8) + 5+12; // worse case bit stuffing = 7/6ths. Includes CRC16 in bitstuffing plus packet structure
-  if (speed == 2) { // high speed
+: USB_Bulk_Interrupt_Endpoint(endpoint, max_packet_size, address, hub_addr, port, speed, USB_ENDPOINT_INTERRUPT) {
+  // worse cast bit stuffing = 7/6ths. Includes CRC16 in bitstuffing plus packet structure
+  uint32_t maxlen = (((capabilities.wMaxPacketSize+2) * 298) >> 8) + 5+12;
+  uint32_t data_time = (19 + 17 + maxlen + 31) >> 5;
+  if (speed == 2) {
     capabilities.Mult = 1 + ((max_packet_size & 0x1800) >> 11);
+    if (capabilities.Mult > 3) capabilities.Mult = 3;
     if (i > 16) i = 16;
     i = 1 << (i - 1);
     if (i > PERIODIC_LIST_SIZE*8)
       i = PERIODIC_LIST_SIZE*8;
     interval = i;
     // IN/OUT, DATA, ACK
-    stime = ((19 + maxlen + 17 + 31) >> 5) * capabilities.Mult;
-    ctime = 0;
+    stime = data_time * capabilities.Mult;
+    capabilities.s_mask = 1;
   } else {
     /* full/low speed interval is in frames
      * round it down to a power of two (required to keep the schedule balanced)
@@ -422,19 +421,78 @@ USB_Interrupt_Endpoint::USB_Interrupt_Endpoint(uint8_t endpoint, uint16_t max_pa
       }
     }
     interval = i << 3;
-    // SSPLIT and CSPLIT use 4 byte tokens, one byte larger than IN/OUT
+    // SSPLIT and CSPLIT use 4 bytes tokens, one byte larger than IN/OUT
     if (endpoint & 0x80) { // IN
-      stime = (20 + 16 + 31) >> 5;           // S-SPLIT, Full/Low IN
-      ctime = (20 + 16 + maxlen + 31) >> 5;  // C-SPLIT, Full/Low IN, DATA
+      stime = (20 + 16 + 31) >> 5;       // SSPLIT, Full/Low IN
+      ctime = data_time;                 // CSPLIT, Full/Low IN, DATA
     } else { // OUT
-      stime = (20 + 16 + maxlen + 31) >> 5; // S-SPLIT, Full/Low OUT, DATA
-      ctime = (20 + 16 + 17 + 31) >> 5;           // C-SPLIT, Full/Low OUT, ACK
+      stime = data_time;                 // SSPLIT, Full/Low OUT, DATA
+      ctime = (20 + 16 + 17 + 31) >> 5;  // CSPLIT, Full/Low OUT, ACK
     }
+    capabilities.s_mask = 1;
+    capabilities.c_mask = 0x1C;
   }
 }
 
-USB_ISO_Endpoint::USB_ISO_Endpoint(uint8_t endpoint, uint16_t max_packet_size, uint8_t address, uint8_t hub_addr, uint8_t port, uint8_t speed, uint32_t interval)
-: dir_in(endpoint & 0x80) {
+bool USB_Interrupt_Endpoint::set_inactive(void) {
+  sync_before_read();
+  if (capabilities.speed != 2 && capabilities.I == 0) {
+    dprintf("setting I on endpoint %p\n", this);
+    capabilities.I = 1;
+    clean_after_write();
+    return true;
+  }
+  return false;
+}
+
+USB_ISO_Endpoint::USB_ISO_Endpoint(uint8_t endpoint, uint16_t max_packet_size, uint8_t _address, uint8_t hub_addr, uint8_t _port, uint32_t i)
+: USB_Periodic_Endpoint(horizontal_link, 4, USB_ENDPOINT_ISOCHRONOUS), dir_in(endpoint & 0x80) {
+  // initialize siTD
+  memset(&horizontal_link, 0, sizeof(usb_siTD_t));
+  horizontal_link = 1;
+  address = _address;
+  endpt = endpoint;
+  hub = hub_addr;
+  port = _port;
+  dir = dir_in ? 1:0;
+  page1 = ((uint32_t)(buffer+4096)) >> 12;
+  back_pointer = 1;
+  // TP, T-count not initialized here; they are written at the beginning of each transfer
+
+  wMaxPacketSize = max_packet_size & 0x7FF;
+  if (wMaxPacketSize >= 1024) wMaxPacketSize = 1023;
+
+  // worse case bit stuffing = 7/6ths. Includes CRC16 in bitstuffing plus packet structure
+  uint32_t maxlen = (((wMaxPacketSize+2) * 298) >> 8) + 5+12;
+  if (i > 16) i = 16;
+  i = 1 << (i - 1);
+
+  if (i > PERIODIC_LIST_SIZE)
+    i = PERIODIC_LIST_SIZE;
+  interval = i << 3;
+
+  uint32_t num_transfers = (wMaxPacketSize+187) / 188;
+  maxlen = (19 + 17 + maxlen + 31) >> 5;
+  // SSPLIT and CSPLIT use 4 byte tokens, one byte larger than IN/OUT
+  // Full/Low IN/OUT are 3 bytes smaller than High (16 vs 9)
+  if (dir_in) {
+    stime = (20 + 16 + 31) >> 5;              // S-SPLIT -> Full/Low IN
+    ctime = maxlen;
+    s_mask = 1;
+    c_mask = ((4 << num_transfers) - 1) << 2;
+  } else {
+    stime = maxlen;
+    s_mask = (4 << num_transfers) - 1;
+  }
+}
+
+void USB_ISO_Endpoint::update(void) {}
+void USB_ISO_Endpoint::flush(void) {}
+
+void USB_ISO_Endpoint::set_masks(uint8_t smask, uint8_t cmask) {
+  s_mask = smask;
+  c_mask = cmask;
+  cache_flush_invalidate(&horizontal_link, sizeof(usb_sitd_transfer));
 }
 
 USB_Hub::USB_Hub(uint8_t addr) : hub_addr(addr) {
@@ -531,7 +589,7 @@ USB_Device::dev_interface* USB_Device::dev_config::interface(uint8_t index) {
   return NULL;
 }
 
-void USB_Device::callback(usb_control_transfer *t, int result) {
+void USB_Device::callback(const usb_control_transfer *t, int result) {
   dprintf("Device<%p> control callback %p result %d\n", this, t, result);
   uint16_t rt_rq = MK_BE16(t->getbmRequestType(), t->getbmRequest());
 
@@ -551,7 +609,7 @@ void USB_Device::callback(usb_control_transfer *t, int result) {
               if (ddesc.iSerialNumber) request_string(ddesc.iSerialNumber);
               // request all configurations (config descriptor only, full size will be retrieved afterwards)
               for (uint8_t c=0; c < ddesc.bNumConfigurations; c++) {
-                control.message(USB_REQTYPE_DEVICE_GET, USB_REQ_GET_DESCRIPTOR, (USB_DT_CONFIGURATION<<8)|c, 0, sizeof(usb_configuration_descriptor), NULL, this);
+                control.Transfer(USB_REQTYPE_DEVICE_GET, USB_REQ_GET_DESCRIPTOR, (USB_DT_CONFIGURATION<<8)|c, 0, sizeof(usb_configuration_descriptor), NULL, this);
               }
               return;
             }
@@ -562,7 +620,7 @@ void USB_Device::callback(usb_control_transfer *t, int result) {
               if (t->getwLength() == sizeof(usb_configuration_descriptor)) {
                 // got the length, now get the entire thing
                 if (cdesc->iConfiguration) request_string(cdesc->iConfiguration);
-                control.message(USB_REQTYPE_DEVICE_GET, USB_REQ_GET_DESCRIPTOR, t->getwValue(), 0, cdesc->wTotalLength, NULL, this);
+                control.Transfer(USB_REQTYPE_DEVICE_GET, USB_REQ_GET_DESCRIPTOR, t->getwValue(), 0, cdesc->wTotalLength, NULL, this);
                 return;
               } else {
                 configs.try_emplace(cdesc->bConfigurationValue, cdesc, result);
@@ -670,24 +728,24 @@ void USB_Device::callback(usb_control_transfer *t, int result) {
       } else {
         dprintf("Setting new interface failed (%d) for interface %u, altSetting %u\n", result, t->getwIndex(), t->getwValue());
         // don't know what altSetting is active now - so ask
-        control.message(USB_REQTYPE_INTERFACE_GET, USB_REQ_GET_INTERFACE, 0, t->getwIndex(), 1, NULL, this);
+        control.Transfer(USB_REQTYPE_INTERFACE_GET, USB_REQ_GET_INTERFACE, 0, t->getwIndex(), 1, NULL, this);
       }
       return;
     case MK_BE16(USB_REQTYPE_ENDPOINT_SET, USB_REQ_CLEAR_FEATURE):
       if (t->getwValue() == USB_FEATURE_ENDPOINT_HALT) {
         if (result >= 0) {
-		  uint8_t endpoint = t->getwIndex();
-		  dprintf("HALT was cleared for endpoint %02X\n", endpoint);
-		  // data toggle must be reset in queue head
-		  int ep_type = Endpoints[endpoint].type;
-		  if (ep_type == USB_ENDPOINT_INTERRUPT || ep_type == USB_ENDPOINT_BULK) {
-			  Endpoints[endpoint].ep->flush();
-		  }
-		}
-		else dprintf("Clearing endpoint halt failed\n");
-		return;
-	  }
-	  break;
+      uint8_t endpoint = t->getwIndex();
+      dprintf("HALT was cleared for endpoint %02X\n", endpoint);
+      // data toggle must be reset in queue head
+      int ep_type = Endpoints[endpoint].type;
+      if (ep_type == USB_ENDPOINT_INTERRUPT || ep_type == USB_ENDPOINT_BULK) {
+        Endpoints[endpoint].ep->flush();
+      }
+    }
+    else dprintf("Clearing endpoint halt failed\n");
+    return;
+    }
+    break;
   }
 
   dprintf("USB_Device<%p>: unknown control request or failure (%d), bmRequestType %02X bmRequest %02X wValue %04X\n", this, result, t->getbmRequestType(), t->getbmRequest(), t->getwValue());
@@ -742,9 +800,9 @@ void USB_Device::USBMessage(const usb_msg_t& msg) {
   switch (msg.type) {
     case USB_MSG_DEVICE_INIT:
       // request string descriptor zero (supported languages)
-      control.message(USB_REQTYPE_DEVICE_GET, USB_REQ_GET_DESCRIPTOR, USB_DT_STRING << 8, 0, 255, NULL, this);
+      control.Transfer(USB_REQTYPE_DEVICE_GET, USB_REQ_GET_DESCRIPTOR, USB_DT_STRING << 8, 0, 255, NULL, this);
       // request device descriptor
-      control.message(USB_REQTYPE_DEVICE_GET, USB_REQ_GET_DESCRIPTOR, USB_DT_DEVICE << 8, 0, sizeof(ddesc), NULL, this);
+      control.Transfer(USB_REQTYPE_DEVICE_GET, USB_REQ_GET_DESCRIPTOR, USB_DT_DEVICE << 8, 0, sizeof(ddesc), NULL, this);
       return;
     case USB_MSG_DEVICE_ENDPOINT_REMOVED:
       dprintf("USB_Device<%p> Endpoint %p removed\n", this, msg.device.endpoint);
@@ -757,17 +815,21 @@ void USB_Device::USBMessage(const usb_msg_t& msg) {
       deref();
       break;
     case USB_MSG_DEVICE_BULK_TRANSFER:
-      BulkTransfer(msg.device.bulkintr.bEndpoint, msg.device.bulkintr.dLength, msg.device.bulkintr.data, msg.device.bulkintr_cb);
+      BulkTransfer(msg.device.bulkintr.bEndpoint, msg.device.bulkintr.dLength, msg.device.bulkintr.data, msg.device.cb);
       deref();
       break;
     case USB_MSG_DEVICE_INTERRUPT_TRANSFER:
-      InterruptTransfer(msg.device.bulkintr.bEndpoint, msg.device.bulkintr.dLength, msg.device.bulkintr.data, msg.device.bulkintr_cb);
+      InterruptTransfer(msg.device.bulkintr.bEndpoint, msg.device.bulkintr.dLength, msg.device.bulkintr.data, msg.device.cb);
       deref();
       break;
     case USB_MSG_DEVICE_CONTROL_TRANSFER:
       ControlTransfer(msg.device.control.bmRequestType, msg.device.control.bmRequest, msg.device.control.wValue, msg.device.control.wIndex, msg.device.control.wLength, msg.device.control.data, msg.device.control_cb);
       deref();
       break;
+    case USB_MSG_DEVICE_ISOCHRONOUS_TRANSFER:
+      //IsochronousTransfer();
+      (*msg.device.cb)(-EOPNOTSUPP);
+      deref();
     default:
       dprintf("Unknown USB Device message: %d\n", msg.type);
   }
@@ -778,7 +840,7 @@ void USB_Device::request_string(uint8_t string_id) {
     if (strings.count(string_id)==0) {
       // add empty string placeholder in case it is requested again before this request completes
       strings[string_id] = "";
-      control.message(USB_REQTYPE_DEVICE_GET, USB_REQ_GET_DESCRIPTOR, (USB_DT_STRING<<8)|string_id, string_lang, 255, NULL, this);
+      control.Transfer(USB_REQTYPE_DEVICE_GET, USB_REQ_GET_DESCRIPTOR, (USB_DT_STRING<<8)|string_id, string_lang, 255, NULL, this);
     }
     else dprintf("String %d was already present (\"%s\")\n", string_id, strings.at(string_id).c_str());
   }
@@ -838,13 +900,14 @@ void USB_Device::activate_endpoint(const usb_endpoint_descriptor* p) {
   switch (p->bmAttributes & 0x3) {
     case USB_ENDPOINT_BULK:
       refcount.fetch_add(1);
-      Endpoints[i].ep = new(std::nothrow) USB_Bulk_Interrupt_Endpoint(p->bEndpointAddress, p->wMaxPacketSize, address, hub_addr, port, speed);
+      Endpoints[i].ep = new(std::nothrow) USB_Bulk_Endpoint(p->bEndpointAddress, p->wMaxPacketSize, address, hub_addr, port, speed);
       if (Endpoints[i].ep != NULL) {
         Endpoints[i].type = USB_ENDPOINT_BULK;
         if (host->activate_endpoint(Endpoints[i].ep, this))
           return;
       }
       break;
+
     case USB_ENDPOINT_INTERRUPT:
       refcount.fetch_add(1);
       Endpoints[i].ep = new(std::nothrow) USB_Interrupt_Endpoint(p->bEndpointAddress, p->wMaxPacketSize, address, hub_addr, port, speed, p->bInterval);
@@ -854,16 +917,17 @@ void USB_Device::activate_endpoint(const usb_endpoint_descriptor* p) {
           return;
       }
       break;
+
     case USB_ENDPOINT_ISOCHRONOUS:
       refcount.fetch_add(1);
-      Endpoints[i].ep = new(std::nothrow) USB_ISO_Endpoint(p->bEndpointAddress, p->wMaxPacketSize, address, hub_addr, port, speed, p->bInterval);
+      Endpoints[i].ep = new(std::nothrow) USB_ISO_Endpoint(p->bEndpointAddress, p->wMaxPacketSize, address, hub_addr, port, p->bInterval);
       if (Endpoints[i].ep != NULL) {
         Endpoints[i].type = USB_ENDPOINT_ISOCHRONOUS;
         if (host->activate_endpoint(Endpoints[i].ep, this))
           return;
-	  }
-	  break;
-    //case USB_ENDPOINT_CONTROL:
+      }
+      break;
+
     default:
       dprintf("Unsupported endpoint type: %02X\n", p->bmAttributes);
       return;
@@ -927,7 +991,7 @@ void USB_Device::activate_interface(uint8_t interface, int altsetting) {
     return;
 
   // set the new interface
-  control.message(USB_REQTYPE_INTERFACE_SET, USB_REQ_SET_INTERFACE, altsetting, interface, 0, NULL, this);
+  control.Transfer(USB_REQTYPE_INTERFACE_SET, USB_REQ_SET_INTERFACE, altsetting, interface, 0, NULL, this);
   // activate new endpoints
   for (auto ep_it = to_add.begin(); ep_it != to_add.end(); ep_it++) {
     activate_endpoint(*ep_it);
@@ -947,7 +1011,7 @@ void USB_Device::activate_configuration(int configuration) {
   }
   if (configs.count(configuration)==0) return;
 
-  control.message(USB_REQTYPE_DEVICE_SET, USB_REQ_SET_CONFIGURATION, configuration, 0, 0, NULL, this);
+  control.Transfer(USB_REQTYPE_DEVICE_SET, USB_REQ_SET_CONFIGURATION, configuration, 0, 0, NULL, this);
   active_config = configuration;
   const usb_configuration_descriptor *c = configs.at(active_config).getConfiguration();
   for (uint8_t i=0; i < c->bNumInterfaces; i++)
@@ -1067,37 +1131,42 @@ uint8_t USB_Device::validate_descriptor(const uint8_t* &desc, const uint8_t* con
  * the endpoints. So use this callback class to pass the result to USB_Device::callback and
  * then the original callback.
  */
-class ProxyCallback : public CCallback<usb_control_transfer> {
+class ControlCallback : public CCallback<usb_control_transfer> {
 private:
-  CCallback<usb_control_transfer>* const dev_cb;
-  CCallback<usb_control_transfer>* const drv_cb;
-  void callback(usb_control_transfer *t, int result) {
-    dev_cb->callback(t, result);
-    drv_cb->callback(t, result);
+  const USBCallback driver_cb;
+  CCallback<usb_control_transfer>* const device_cb;
+
+  virtual void callback(const usb_control_transfer *t, int result) override {
+    if (device_cb)
+      device_cb->callback(t, result);
+    driver_cb(result);
     delete this;
   }
 public:
-  ProxyCallback(CCallback<usb_control_transfer>* _dev_cb, CCallback<usb_control_transfer>* _drv_cb) :
-  dev_cb(_dev_cb), drv_cb(_drv_cb) {}
+  ControlCallback(const USBCallback* drv_cb, CCallback<usb_control_transfer>* dev_cb) : driver_cb(*drv_cb), device_cb(dev_cb) {}
 };
 
-void USB_Device::ControlTransfer(uint8_t bmRequestType, uint8_t bmRequest, uint16_t wValue, uint16_t wIndex, uint16_t wLength, void *data, CCallback<usb_control_transfer>* drv_cb) {
+bool USB_Device::prepare_control_transfer(usb_msg_t &msg) {
   bool proxy = false;
-  CCallback<usb_control_transfer>* cb = drv_cb;
+  const uint8_t bmRequestType = msg.device.control.bmRequestType;
+  const uint8_t bmRequest = msg.device.control.bmRequest;
+  const uint16_t wValue = msg.device.control.wValue;
+  const uint16_t wIndex = msg.device.control.wIndex;
 
   uint16_t rt_rq = MK_BE16(bmRequestType, bmRequest);
   switch (rt_rq) {
-    // changing device address is not allowed
+    // change device address is not allowed
     case MK_BE16(USB_REQTYPE_DEVICE_SET, USB_REQ_SET_ADDRESS):
-      drv_cb->callback(NULL, -EINVAL);
-      return;
+      errno = EINVAL;
+      return false;
     case MK_BE16(USB_REQTYPE_DEVICE_GET, USB_REQ_GET_DESCRIPTOR):
-      if ((wValue >> 8) == USB_DT_STRING) proxy = true;
+      if ((wValue >> 8) == USB_DT_STRING)
+        proxy = true;
       break;
     case MK_BE16(USB_REQTYPE_DEVICE_SET, USB_REQ_SET_CONFIGURATION):
-      // TODO: don't allow this for interface drivers
-      proxy = true;
-      break;
+      // TODO: allow this from device drivers but not interface drivers
+      errno = EINVAL;
+      return false;
     case MK_BE16(USB_REQTYPE_INTERFACE_GET, USB_REQ_GET_INTERFACE):
     case MK_BE16(USB_REQTYPE_INTERFACE_SET, USB_REQ_SET_INTERFACE):
       proxy = true;
@@ -1105,40 +1174,47 @@ void USB_Device::ControlTransfer(uint8_t bmRequestType, uint8_t bmRequest, uint1
     case MK_BE16(USB_REQTYPE_ENDPOINT_SET, USB_REQ_CLEAR_FEATURE):
       if (wValue == USB_FEATURE_ENDPOINT_HALT) {
         if (wIndex == 0) { // CLEAR_HALT is invalid for endpoint 0
-		  drv_cb->callback(NULL, -EINVAL);
-		  return;
-		}
-		proxy = true;
-	  }
+          errno = EINVAL;
+          return false;
+        }
+        proxy = true;
+      }
       break;
   }
 
-  if (proxy == true) {
-    cb = new(std::nothrow) ProxyCallback(this, drv_cb);
-    if (cb == NULL) {
-      drv_cb->callback(NULL, -ENOMEM);
-      return;
-    }
-  }
+  msg.device.control_cb = new ControlCallback(msg.device.cb, proxy ? this : NULL);
+  return true;
+}
 
-  if (control.message(bmRequestType, bmRequest, wValue, wIndex, wLength, data, cb) < 0) {
-    if (proxy == true) delete cb;
-    drv_cb->callback(NULL, -errno);
+void USB_Device::ControlTransfer(uint8_t bmRequestType, uint8_t bmRequest, uint16_t wValue, uint16_t wIndex, uint16_t wLength, void *data, CCallback<usb_control_transfer>* cb) {
+  if (control.Transfer(bmRequestType, bmRequest, wValue, wIndex, wLength, data, cb) < 0) {
+    cb->callback(NULL, -errno);
   }
 }
 
-void USB_Device::BulkInterruptTransfer(uint8_t bEndpoint, uint32_t dLength, void *data, CCallback<usb_bulk_interrupt_transfer>* cb, bool bulk) {
-  if (Endpoints[bEndpoint].type == (bulk ? USB_ENDPOINT_BULK : USB_ENDPOINT_INTERRUPT)) {
-    if (static_cast<USB_Bulk_Interrupt_Endpoint*>(Endpoints[bEndpoint].ep)->message(dLength, data, cb)==0)
+void USB_Device::BulkTransfer(uint8_t bEndpoint, uint32_t dLength, void *data, const USBCallback* cb) {
+  if (Endpoints[bEndpoint].type == USB_ENDPOINT_BULK) {
+    if (Endpoints[bEndpoint].ep->BulkTransfer(dLength, data, cb) == 0)
       return;
   }
   else errno = ENXIO;
-  cb->callback(NULL, -errno);
+  (*cb)(-errno);
+}
+
+void USB_Device::InterruptTransfer(uint8_t bEndpoint, uint32_t dLength, void *data, const USBCallback* cb) {
+  if (Endpoints[bEndpoint].type == USB_ENDPOINT_INTERRUPT) {
+    if (Endpoints[bEndpoint].ep->InterruptTransfer(dLength, data, cb) == 0)
+      return;
+  }
+  else errno = ENXIO;
+  (*cb)(-errno);
 }
 
 bool USB_Device::pushMessage(usb_msg_t& msg) {
   switch (msg.type) {
     case USB_MSG_DEVICE_CONTROL_TRANSFER:
+      if (prepare_control_transfer(msg) == false)
+        return false;
     case USB_MSG_DEVICE_BULK_TRANSFER:
     case USB_MSG_DEVICE_INTERRUPT_TRANSFER:
     case USB_MSG_DEVICE_ISOCHRONOUS_TRANSFER:
@@ -1193,38 +1269,11 @@ USB_Driver::USB_Driver() {
   dprintf("new USB_Driver %p\n", this);
 }
 
-template <class Transfer>
-class DriverCallback : public CCallback<Transfer> {
-private:
-  const std::function<void(int)> rfunc;
-public:
-  void callback(Transfer*, int result) {
-    rfunc(result);
-    delete this;
-  }
-  DriverCallback(const std::function<void(int)> &_rfunc) : rfunc(_rfunc) {}
-};
-
-template<class transfer_type>
-static int DriverMessage(usb_msg_t &msg, const std::function<void(int)> &cb_func, USB_Device *device) {
-  if (device == NULL) errno = ENOENT;
-  else {
-    DriverCallback<transfer_type> *cb = new(std::nothrow) DriverCallback<transfer_type>(cb_func);
-    if (cb != NULL) {
-      msg.device.cb = cb;
-      if (device->pushMessage(msg))
-        return 0;
-      delete cb;
-	}
-	errno = ENOMEM;
-  }
-  return -1;
-}
-
-int USB_Driver::ControlMessage(uint8_t bmRequestType, uint8_t bmRequest, uint16_t wValue, uint16_t wIndex, uint16_t wLength, void *data, const std::function<void(int)> &cb_func) {
+int USB_Driver::ControlMessage(uint8_t bmRequestType, uint8_t bmRequest, uint16_t wValue, uint16_t wIndex, uint16_t wLength, void *data, const USBCallback* cb_func) {
   usb_msg_t msg = {
     .type = USB_MSG_DEVICE_CONTROL_TRANSFER,
     .device = {
+    .cb = cb_func,
       .control = {
         .bmRequestType = bmRequestType,
         .bmRequest = bmRequest,
@@ -1232,38 +1281,98 @@ int USB_Driver::ControlMessage(uint8_t bmRequestType, uint8_t bmRequest, uint16_
         .wIndex = wIndex,
         .wLength = wLength,
         .data = data
-	  }
-	}
+    }
+  }
   };
-  return DriverMessage<usb_control_transfer>(msg, cb_func, device);
+  if (device == NULL) errno = ENOENT;
+  else {
+    if (device->pushMessage(msg))
+      return 0;
+    errno = ENOMEM;
+  }
+  return -1;
 }
 
-int USB_Driver::BulkMessage(uint8_t bEndpoint, uint32_t dLength, void *data, const std::function<void(int)> &cb_func) {
+int USB_Driver::ControlMessage(uint8_t bmRequestType, uint8_t bmRequest, uint16_t wValue, uint16_t wIndex, uint16_t wLength, void *data, const USBCallback &cb_func) {
+  // control callback is always copied so don't need to clone it
+  return ControlMessage(bmRequestType,bmRequest,wValue,wIndex,wLength,data,&cb_func);
+}
+
+int USB_Driver::BulkMessage(uint8_t bEndpoint, uint32_t dLength, void *data, const USBCallback* cb_func) {
   usb_msg_t msg = {
     .type = USB_MSG_DEVICE_BULK_TRANSFER,
     .device = {
+      .cb = cb_func,
       .bulkintr = {
         .bEndpoint = bEndpoint,
         .dLength = dLength,
         .data = data
-	  }
-	}
+      }
+    }
   };
-  return DriverMessage<usb_bulk_interrupt_transfer>(msg, cb_func, device);
+  if (device == NULL) errno = ENOENT;
+  else {
+    if (device->pushMessage(msg))
+      return 0;
+    errno = ENOMEM;
+  }
+  return -1;
 }
 
-int USB_Driver::InterruptMessage(uint8_t bEndpoint, uint16_t wLength, void *data, const std::function<void(int)> &cb_func) {
+int USB_Driver::InterruptMessage(uint8_t bEndpoint, uint16_t wLength, void *data, const USBCallback* cb_func) {
   usb_msg_t msg = {
     .type = USB_MSG_DEVICE_INTERRUPT_TRANSFER,
     .device = {
+    .cb = cb_func,
       .bulkintr = {
         .bEndpoint = bEndpoint,
         .dLength = wLength,
         .data = data
-	  }
-	}
+      }
+    }
   };
-  return DriverMessage<usb_bulk_interrupt_transfer>(msg, cb_func, device);
+  if (device == NULL) errno = ENOENT;
+  else {
+    if (device->pushMessage(msg))
+      return 0;
+    errno = ENOMEM;
+  }
+  return -1;
+}
+
+class FuncWrapper {
+private:
+  const USBCallback base;
+public:
+  const USBCallback wrap = [=](int r) {
+    base(r);
+    delete this;
+  };
+  FuncWrapper(USBCallback& b) : base(std::move(b)) {}
+};
+
+int USB_Driver::BulkMessage(uint8_t bEndpoint, uint32_t dLength, void *data, USBCallback cb_func) {
+  FuncWrapper* cb = new (std::nothrow) FuncWrapper(cb_func);
+  if (cb == NULL) {
+    errno = ENOMEM;
+  } else {
+    if (BulkMessage(bEndpoint, dLength, data, &cb->wrap) >= 0)
+      return 0;
+    delete cb;
+  }
+  return -1;
+}
+
+int USB_Driver::InterruptMessage(uint8_t bEndpoint, uint16_t wLength, void *data, USBCallback cb_func) {
+  FuncWrapper* cb = new (std::nothrow) FuncWrapper(cb_func);
+  if (cb == NULL) {
+    errno = ENOMEM;
+  } else {
+    if (InterruptMessage(bEndpoint, wLength, data, &cb->wrap) >= 0)
+      return 0;
+    delete cb;
+  }
+  return -1;
 }
 
 // synchronous functions - not implemented here, these use weak symbols so they can be overridden using OS specific code
@@ -1284,7 +1393,7 @@ __attribute__((weak)) int USB_Driver::InterruptMessage(uint8_t bEndpoint, uint16
 
 USB_Host::Enum_Control::Enum_Control() : USB_Control_Endpoint(64, 0, 0, 0, 0) {
   // first pipe, link to self
-  horizontal_link = (uint32_t)static_cast<usb_queue_head_t*>(this) | 2;
+  horizontal_link = link_to;
   capabilities.H = 1;
 
   in_progress = false;
@@ -1318,7 +1427,7 @@ void USB_Host::Enum_Control::clean(void) {
   flush();
 }
 
-void USB_Host::callback(usb_control_transfer* t, int result) {
+void USB_Host::callback(const usb_control_transfer* t, int result) {
   if (Enum.in_progress == false) return;
 
   USB_Hub &hub = *Enum.hub;
@@ -1330,7 +1439,7 @@ void USB_Host::callback(usb_control_transfer* t, int result) {
   if (result >= 0) {
     if (t == NULL) {
       dprintf("!!! Enumeration begin !!!\n");
-      Enum.message(USB_REQTYPE_DEVICE_GET, USB_REQ_GET_DESCRIPTOR, (USB_DT_DEVICE << 8), 0, sizeof(usb_device_descriptor), NULL, this);
+      Enum.Transfer(USB_REQTYPE_DEVICE_GET, USB_REQ_GET_DESCRIPTOR, (USB_DT_DEVICE << 8), 0, sizeof(usb_device_descriptor), NULL, this);
       return;
     }
 
@@ -1365,7 +1474,7 @@ void USB_Host::callback(usb_control_transfer* t, int result) {
           * Workaround: send a request to set address to 0, doesn't matter if it accepts it or not. Also safe for any other devices that end up here.
           */
         if (result>=16 && desc->idVendor==0x0A12 && desc->idProduct==0x0001 && desc->bcdDevice==0x0134) {
-          Enum.message(USB_REQTYPE_DEVICE_SET, USB_REQ_SET_ADDRESS, 0, 0, 0, NULL, this);
+          Enum.Transfer(USB_REQTYPE_DEVICE_SET, USB_REQ_SET_ADDRESS, 0, 0, 0, NULL, this);
           return;
         }
       } else {
@@ -1380,7 +1489,7 @@ void USB_Host::callback(usb_control_transfer* t, int result) {
       if (d != NULL) {
         hub.port[port].device = d;
         // set the address (possibly for the second time)
-        Enum.message(USB_REQTYPE_DEVICE_SET, USB_REQ_SET_ADDRESS, address, 0, 0, NULL, this);
+        Enum.Transfer(USB_REQTYPE_DEVICE_SET, USB_REQ_SET_ADDRESS, address, 0, 0, NULL, this);
         return;
       }
       release_address(address);
@@ -1397,7 +1506,7 @@ void USB_Host::callback(usb_control_transfer* t, int result) {
     } else if (result==-EBUSY && Enum.address_retry!=0) {
       // reset timeout
       set_port_timeout(*Enum.hub, Enum.port, 500);
-      Enum.message(USB_REQTYPE_DEVICE_SET, USB_REQ_SET_ADDRESS, Enum.address_retry, 0, 0, NULL, this);
+      Enum.Transfer(USB_REQTYPE_DEVICE_SET, USB_REQ_SET_ADDRESS, Enum.address_retry, 0, 0, NULL, this);
       return;
     }
   }
@@ -1571,30 +1680,31 @@ void USB_Host::update_transfers(void) {
   }
 }
 
-void USB_Host::add_async_queue(USB_QH_Endpoint *ep) {
+void USB_Host::add_async_queue(USB_Endpoint *ep) {
   Enum.sync_before_read();
-  ep->horizontal_link = Enum.horizontal_link;
-  ep->clean_after_write();
-  Enum.horizontal_link = (uint32_t)static_cast<usb_queue_head_t*>(ep) | 2;
-  Enum.sync_after_write();
+  ep->hlink = Enum.hlink;
+  // this is typically where an endpoint is first activated so flush the entire queue head
+  cache_flush_invalidate(&ep->hlink, sizeof(usb_queue_head_t));
+  Enum.hlink = ep->link_to;
+  cache_flush_invalidate(&Enum.hlink);
   ep->host_next = endpoints;
   endpoints = ep;
 }
 
-bool USB_Host::remove_async_queue(USB_QH_Endpoint *ep) {
-  dprintf("Removing async USB_QH_Endpoint %p\n", ep);
+bool USB_Host::remove_async_queue(USB_Endpoint *ep) {
+  dprintf("Removing async USB_Endpoint %p\n", ep);
 
-  uint32_t qh = (uint32_t)(static_cast<usb_queue_head_t*>(ep)) | 2;
-  usb_queue_head_t* prev = static_cast<usb_queue_head_t*>(&Enum);
-  while (prev->horizontal_link != qh) {
-    prev = (usb_queue_head_t*)(prev->horizontal_link & ~0x1F);
-    if (prev == static_cast<usb_queue_head_t*>(&Enum)) {
-      dprintf("Can't removed USB_QH_Endpoint %p, not found in async list\n", ep);
+  uint32_t qh = ep->link_to;
+  uint32_t* prev = &Enum.hlink;
+  while (*prev != qh) {
+  if (*prev == Enum.link_to) {
+      dprintf("Can't removed USB_Endpoint %p, not found in async list\n", ep);
       return false;
-    }
+  }
+  prev = (uint32_t*)(*prev & ~0x1F);
   }
   cache_invalidate(prev);
-  prev->horizontal_link = ep->horizontal_link;
+  *prev = ep->hlink;
   cache_flush_invalidate(prev);
   // remove from active endpoint list
   USB_Endpoint **p = &endpoints;
@@ -1616,30 +1726,35 @@ bool USB_Host::remove_async_queue(USB_QH_Endpoint *ep) {
   return true;
 }
 
-bool USB_Host::calculate_offset(USB_Interrupt_Endpoint *ep, uint32_t &offset) const {
+bool USB_Host::calculate_offset(USB_Periodic_Endpoint *ep, uint32_t &offset) const {
   const uint32_t interval = ep->interval;
   const uint32_t stime = ep->stime;
   const uint32_t ctime = ep->ctime;
+  uint8_t s_mask, c_mask;
+  ep->get_masks(s_mask, c_mask);
 
   uint32_t best_bandwidth = 0xFFFFFFFF;
   // for each possible uframe offset, find the worst uframe_bandwidth
   for (uint32_t off=0; off < interval; off++) {
-    // low/full speed can't start in uframes 4-7 without FSTN (TODO)
-    if (ctime != 0 && (off & 4))
+    // low/full speed can't have splits across frames
+    if ((s_mask << (off&7)) >= 256)
+      continue;
+    if ((c_mask << (off&7)) >= 256)
       continue;
     uint32_t max_bandwidth = 0;
     for (uint32_t i=off; i < PERIODIC_LIST_SIZE*8; i += interval) {
-      uint32_t bw1 = uframe_bandwidth[i>>3][i&7] + stime;
-      if (ctime != 0) {
-        uint32_t bw2 = uframe_bandwidth[i>>3][(i&7) + 2] + ctime;
-        uint32_t bw3 = uframe_bandwidth[i>>3][(i&7) + 3] + ctime;
-        uint32_t bw4 = uframe_bandwidth[i>>3][(i&7) + 4] + ctime;
-        // bubble max of 4 values
-        if (bw2 > bw1) bw1 = bw2;
-        if (bw4 > bw3) bw3 = bw4;
-        if (bw3 > bw1) bw1 = bw3;
+      uint32_t umax = max_bandwidth;
+      for (uint8_t j=0; j < 8; j++) {
+        if ((s_mask | c_mask) & (1<<j)) {
+          uint32_t bw = uframe_bandwidth[(i+j) % (PERIODIC_LIST_SIZE*8)];
+          if (s_mask & (1<<j))
+            bw += stime;
+          if (c_mask & (1<<j))
+            bw += ctime;
+          if (bw > umax) umax = bw;
+        }
       }
-      if (bw1 > max_bandwidth) max_bandwidth = bw1;
+      if (umax > max_bandwidth) max_bandwidth = umax;
     }
     // remember which uframe offset is the best
     if (max_bandwidth < best_bandwidth) {
@@ -1651,21 +1766,22 @@ bool USB_Host::calculate_offset(USB_Interrupt_Endpoint *ep, uint32_t &offset) co
   if (best_bandwidth > 187) return false;
   switch (interval) {
     case 1:
-      ep->capabilities.s_mask = 0xFF;
+      s_mask = 0xFF;
       break;
     case 2:
-      ep->capabilities.s_mask = 0x55 << (offset & 1);
+      s_mask = 0x55 << (offset & 1);
       break;
     case 4:
-      ep->capabilities.s_mask = 0x11 << (offset & 3);
+      s_mask = 0x11 << (offset & 3);
       break;
     default:
-      ep->capabilities.s_mask = 1 << (offset & 7);
-      // full/low-speed are guaranteed to have interval>=8
-      if (ctime) ep->capabilities.c_mask = 0x1C << (offset & 7);
+      s_mask <<= (offset & 7);
+      c_mask <<= (offset & 7);
   }
+  ep->set_masks(s_mask, c_mask);
   offset >>= 3;
-  dprintf("Endpoint<%p> speed %d interval %lu offset %lu stime %lu ctime %lu s_mask %02X c_mask %02X\n", ep, ep->capabilities.speed, interval, offset, stime, ctime, ep->capabilities.s_mask, ep->capabilities.c_mask);
+//  dprintf("Endpoint<%p> speed %d interval %lu offset %lu stime %lu ctime %lu s_mask %02X c_mask %02X\n", ep, ep->capabilities.speed, interval, offset, stime, ctime, s_mask, c_mask);
+  dprintf("Endpoint<%p> interval %lu offset %lu stime %lu ctime %lu s_mask %02X c_mask %02X\n", ep, interval, offset, stime, ctime, s_mask, c_mask);
   return true;
 }
 
@@ -1681,10 +1797,13 @@ void USB_Host::notify_endpoint_removed(USB_Endpoint *ep) {
 }
 
 void USB_Host::unschedule_periodic(void) {
-  if (periodic_cleanup == NULL) return;
-  USB_Interrupt_Endpoint *ep = static_cast<USB_Interrupt_Endpoint*>(periodic_cleanup);
+  uint8_t s_mask, c_mask;
 
-  if (ep->capabilities.s_mask == 0) {
+  if (periodic_cleanup == NULL) return;
+  USB_Periodic_Endpoint *ep = static_cast<USB_Periodic_Endpoint*>(periodic_cleanup);
+  ep->get_masks(s_mask, c_mask);
+
+  if (s_mask == 0) {
     // endpoint has been removed from schedule and the frame index has rolled over
     // so it should be completely safe to remove now
     dprintf("unschedule: safe to remove %p\n", ep);
@@ -1693,16 +1812,13 @@ void USB_Host::unschedule_periodic(void) {
     return;
   }
 
-  ep->sync_before_read();
   // low/full speed endpoints must be inactive to ensure split transactions aren't interrupted
-  if (ep->capabilities.speed != 2 && ep->capabilities.I == 0) {
-    dprintf("unschedule: setting I on endpoint %p\n", ep);
-    ep->capabilities.I = 1;
-    ep->clean_after_write();
+  if (ep->set_inactive() == true)
     return;
-  }
 
-  uint32_t uqh = (uint32_t)(static_cast<usb_queue_head_t*>(ep)) | 2;
+  uint32_t uqh = ep->link_to;
+  uint8_t stime = ep->stime;
+  uint8_t ctime = ep->ctime;
   const uint32_t f_interval = (ep->interval > 8) ? (ep->interval>>3) : 1; // uframes -> frames
   /* start with an interval of 1, once we find the first
    * occurrence use the actual interval
@@ -1713,9 +1829,9 @@ void USB_Host::unschedule_periodic(void) {
     while ((*h & 1) == 0) {
       if (*h == uqh) {
         // unlink ep from this frame
-        dprintf("unschedule: endpoint %p removed from frame %lu (%08lX)\n", ep, offset, ep->horizontal_link);
+        dprintf("unschedule: endpoint %p removed from frame %lu (%08lX)\n", ep, offset, ep->hlink);
         cache_invalidate(h);
-        *h = ep->horizontal_link;
+        *h = ep->hlink;
         cache_flush_invalidate(h);
         interval = f_interval;
         break;
@@ -1730,12 +1846,13 @@ void USB_Host::unschedule_periodic(void) {
     if (interval == f_interval) {
       for (uint8_t u=0; u < 8; u++) {
         // assumes s_mask and c_mask don't overlap
-        if (ep->capabilities.s_mask & (1<<u)) {
-          uframe_bandwidth[offset][u] -= ep->stime;
-          dprintf("bandwidth[%lu][%u] = %u\n", offset, u, uframe_bandwidth[offset][u]);
-        } else if (ep->capabilities.c_mask & (1<<u)) {
-          uframe_bandwidth[offset][u] -= ep->ctime;
-          dprintf("bandwidth[%lu][%u] = %u\n", offset, u, uframe_bandwidth[offset][u]);
+        if (s_mask & (1<<u)) {
+          uframe_bandwidth[offset*8+u] -= stime;
+          dprintf("bandwidth[%lu] = %u\n", offset*8+u, uframe_bandwidth[offset*8+u]);
+        }
+        if (c_mask & (1<<u)) {
+          uframe_bandwidth[offset*8+u] -= ctime;
+          dprintf("bandwidth[%lu] = %u\n", offset*8+u, uframe_bandwidth[offset*8+u]);
         }
       }
     }
@@ -1744,12 +1861,10 @@ void USB_Host::unschedule_periodic(void) {
    * Technically this is undefined behaviour but should be fine -
    * the masks just tell the host which uframes can be used for the pipe
    */
-  ep->capabilities.s_mask = 0;
-  ep->capabilities.c_mask = 0;
-  ep->clean_after_write();
+  ep->set_masks(0, 0);
 }
 
-void USB_Host::add_periodic_queue(USB_Interrupt_Endpoint *ep) {
+void USB_Host::add_periodic_queue(USB_Periodic_Endpoint *ep) {
   uint32_t offset;
   if (calculate_offset(ep, offset) == false) {
     // no bandwidth available - tell the device it is inactive
@@ -1759,36 +1874,45 @@ void USB_Host::add_periodic_queue(USB_Interrupt_Endpoint *ep) {
 
   const uint32_t interval = ep->interval;
   const uint32_t f_interval = (interval > 8) ? (interval>>3) : 1;
+  uint8_t s_mask, c_mask;
+  ep->get_masks(s_mask, c_mask);
+  uint32_t* ep_link = &ep->hlink;
+  uint32_t link_to = ep->link_to;
+  uint8_t stime = ep->stime;
+  uint8_t ctime = ep->ctime;
+  uint8_t ep_type = ep->ep_type;
 
   /* use the interval and offset to insert the endpoint into the periodic schedule,
     * and s_mask+c_mask to update uframe_bandwidth
     * (interval and offset are milliseconds/frames)
     */
   for (uint32_t i=offset; i < PERIODIC_LIST_SIZE; i += f_interval) {
-    uint32_t *h = periodictable+i;
-    while ((*h & 1)==0 && h!=&ep->horizontal_link) {
-      usb_queue_head_t* qh = (usb_queue_head_t*)(*h & ~0x1F);
+    uint32_t* h = periodictable+i;
+    while ((*h & 1)==0 && h!=ep_link) {
+      uint32_t next = *h;
       // insert in front of queue heads with smaller intervals, otherwise keep traversing
-      if ((*h & 0x1F) == 2) {
-        uint32_t prev_interval = static_cast<USB_Interrupt_Endpoint*>(qh)->interval;
-        dprintf("Comparing interval: %u vs %u\n", prev_interval, interval);
+      if ((next & 0x1F) == 2) { // queue head
+        auto qh = (const usb_queue_head_t*)(next & ~0x1F);
+        uint32_t prev_interval = static_cast<const USB_Interrupt_Endpoint*>(qh)->interval;
+        dprintf("Comparing qh interval: %u vs %u\n", prev_interval, interval);
         if (prev_interval < interval)
           break;
       }
       // go to next / follow horizontal
-      h = &qh->horizontal_link;
+      h = (uint32_t*)(next & ~0x1F);
     }
 
     // update uframe_bandwidth
     for (uint32_t j=0; j < 8; j++) {
       uint32_t mask = 1<<j;
-      if (mask & ep->capabilities.s_mask) {
-        uframe_bandwidth[i][j] += ep->stime;
-        dprintf("Updated frame %lu/%lu bandwidth for stime: %u\n", i, j, uframe_bandwidth[i][j]);
-        // s_mask and c_mask will never be active for the same uframe
-      } else if (mask & ep->capabilities.c_mask) {
-        uframe_bandwidth[i][j] += ep->ctime;
-        dprintf("Updated frame %lu/%lu bandwidth for ctime: %u\n", i, j, uframe_bandwidth[i][j]);
+      if (mask & s_mask) {
+        uframe_bandwidth[i*8+j] += stime;
+        dprintf("Updated frame %lu/%lu bandwidth for stime: %u\n", i, j, uframe_bandwidth[i*8+j]);
+        // assumes s_mask and c_mask will never be active for the same uframe
+      }
+      if (mask & c_mask) {
+        uframe_bandwidth[i*8+j] += ctime;
+        dprintf("Updated frame %lu/%lu bandwidth for ctime: %u\n", i, j, uframe_bandwidth[i*8+j]);
       }
     }
 
@@ -1796,21 +1920,21 @@ void USB_Host::add_periodic_queue(USB_Interrupt_Endpoint *ep) {
      * ourselves after an existing node we will already be scheduled for
      * all the same intervals as that node...
      */
-    if (h != &ep->horizontal_link) {
+    if (h != ep_link) {
       // insert into the scheduling tree
-      if (ep->horizontal_link == 1) {
+      if (*ep_link == 1) {
         // update the endpoint's horizontal link only once - all following nodes repeat with the same interval
-        ep->horizontal_link = *h;
-        dprintf("Linking %p to qh %p, next %08lX\n", h, static_cast<usb_queue_head_t*>(ep), ep->horizontal_link);
-        ep->clean_after_write();
+        *ep_link = *h;
+        dprintf("Linking %p to %08X, next %08lX\n", h, link_to, *h);
+        cache_flush_invalidate(ep_link);
       } else {
-        dprintf("Linking %p to qh %p\n", h, static_cast<usb_queue_head_t*>(ep));
+        dprintf("Linking %p to %08X\n", h, link_to);
       }
       cache_invalidate(h);
-      *h = (uint32_t)(static_cast<usb_queue_head_t*>(ep)) | 2;
+      *h = link_to;
       cache_flush_invalidate(h);
     } else {
-      dprintf("qh %p found already in schedule at frame %lu\n", static_cast<usb_queue_head_t*>(ep), i);
+      dprintf("%p found already in schedule at frame %lu\n", ep_link, i);
     }
   }
   // put in host's active list of endpoints
@@ -1818,8 +1942,8 @@ void USB_Host::add_periodic_queue(USB_Interrupt_Endpoint *ep) {
   endpoints = ep;
 }
 
-bool USB_Host::remove_periodic_queue(USB_Interrupt_Endpoint *ep) {
-  dprintf("Removing periodic USB_Interrupt_Endpoint %p\n", ep);
+bool USB_Host::remove_periodic_queue(USB_Periodic_Endpoint *ep) {
+  dprintf("Removing periodic USB_Endpoint %p\n", ep);
   // first remove it from the host's active endpoint list
   USB_Endpoint **b = &endpoints;
   while (*b != ep) {
@@ -1874,6 +1998,7 @@ USB_Host::USB_Host(usb_ehci_base_t* const base) :
   nPorts(base->HCSPARAMS.N_PORTS)
 {
   periodictable = (uint32_t*)aligned_alloc(4096, sizeof(uint32_t)*PERIODIC_LIST_SIZE);
+  memset(addresses, 0, sizeof(addresses));
   // reserve address 0
   addresses[0] = 1;
   endpoints = &Enum;
@@ -1903,9 +2028,9 @@ void USB_Host::usb_process(void) {
   setHostMode();
   EHCI->PERIODICLISTBASE = periodictable;
   EHCI->FRINDEX = 0;
-  dprintf("Enumeration endpoint: %p\n", static_cast<usb_queue_head_t*>(&Enum));
+  dprintf("Enumeration endpoint: %p\n", &Enum.hlink);
   Enum.clean_after_write();
-  EHCI->ASYNCLISTADDR = static_cast<usb_queue_head_t*>(&Enum);
+  EHCI->ASYNCLISTADDR = Enum.link_to & ~0x1F;
   uint32_t usbcmdinit = 0;
 #if (PERIODIC_LIST_SIZE >= 8 && PERIODIC_LIST_SIZE < 128)
     usbcmdinit |= USB_USBCMD_FS_2 | USB_USBCMD_FS_1((64 - PERIODIC_LIST_SIZE) / 17);
@@ -1917,7 +2042,7 @@ void USB_Host::usb_process(void) {
   dprintf("USBCMD (FS): %08lX\n", usbcmdinit);
   // ensure other registers are written before CMD is updated
   mem_sync();
-  EHCI->USBCMD = usbcmdinit | USB_USBCMD_ITC(1) | USB_USBCMD_RS | USB_USBCMD_ASP(3) | USB_USBCMD_ASPE | USB_USBCMD_PSE | USB_USBCMD_ASE;
+  EHCI->USBCMD = usbcmdinit | USB_USBCMD_ITC(0) | USB_USBCMD_RS | USB_USBCMD_ASP(3) | USB_USBCMD_ASPE | USB_USBCMD_PSE | USB_USBCMD_ASE;
 
   EHCI->CONFIGFLAG = 1;
   // turn on ports, set their stage to 1
@@ -2031,37 +2156,38 @@ void USB_Host::usb_process(void) {
         continue;
       case USB_MSG_ENDPOINT_ACTIVATE:
         msg.endpoint.ep->device = msg.endpoint.device;
-        switch (msg.endpoint.ep->endpoint_type()) {
+        switch (msg.endpoint.ep->ep_type) {
           case USB_ENDPOINT_INTERRUPT:
-            add_periodic_queue(static_cast<USB_Interrupt_Endpoint*>(msg.endpoint.ep));
+          case USB_ENDPOINT_ISOCHRONOUS:
+            add_periodic_queue(static_cast<USB_Periodic_Endpoint*>(msg.endpoint.ep));
             break;
           case USB_ENDPOINT_BULK:
           case USB_ENDPOINT_CONTROL:
-            add_async_queue(static_cast<USB_QH_Endpoint*>(msg.endpoint.ep));
+            add_async_queue(msg.endpoint.ep);
             break;
           default:
-            dprintf("Don't know how to activate endpoint %p, type is %d\n", msg.endpoint.ep, msg.endpoint.ep->endpoint_type());
+            dprintf("Don't know how to activate endpoint %p, type is %d\n", msg.endpoint.ep, msg.endpoint.ep->ep_type);
             notify_endpoint_removed(msg.endpoint.ep);
             break;
-		}
+        }
         continue;
       case USB_MSG_ENDPOINT_DEACTIVATE:
-        switch (msg.endpoint.ep->endpoint_type()) {
-			case USB_ENDPOINT_INTERRUPT:
-              if (remove_periodic_queue(static_cast<USB_Interrupt_Endpoint*>(msg.endpoint.ep)) == true)
-                continue;
-              break;
-			case USB_ENDPOINT_CONTROL:
-			case USB_ENDPOINT_BULK:
-			  if (remove_async_queue(static_cast<USB_QH_Endpoint*>(msg.endpoint.ep)) == true)
-			  	continue;
-			  break;
-			default:
-			  dprintf("Don't know how to deactivate endpoint %p, type is %d\n", msg.endpoint.ep, msg.endpoint.ep->endpoint_type());
-		}
-		// removal could not be queued, send notification now
-		notify_endpoint_removed(msg.endpoint.ep);
-		continue;
+        switch (msg.endpoint.ep->ep_type) {
+          case USB_ENDPOINT_INTERRUPT:
+            if (remove_periodic_queue(static_cast<USB_Periodic_Endpoint*>(msg.endpoint.ep)) == true)
+              continue;
+            break;
+          case USB_ENDPOINT_CONTROL:
+          case USB_ENDPOINT_BULK:
+            if (remove_async_queue(msg.endpoint.ep) == true)
+              continue;
+            break;
+          default:
+            dprintf("Don't know how to deactivate endpoint %p, type is %d\n", msg.endpoint.ep, msg.endpoint.ep->ep_type);
+        }
+        // removal could not be queued, send notification now
+        notify_endpoint_removed(msg.endpoint.ep);
+        continue;
       case USB_MSG_DEVICE_INIT:
       case USB_MSG_DEVICE_ENDPOINT_REMOVED:
       case USB_MSG_DEVICE_FIND_DRIVER:

@@ -50,6 +50,7 @@ private:
   void uart_mode(uint32_t mode);
   void start(void);
 
+  USBCallback status_cb = [=](int r) { status_callback(r); };
   void status_callback(int result);
   void get_status(void);
 

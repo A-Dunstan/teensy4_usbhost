@@ -153,8 +153,7 @@ __attribute__((weak)) int usleep(useconds_t us) {
 
 // synchronous functions implemented using atomThreads (semaphores)
 /* using a template here gives a better chance of the compiler inlining this into
- * the calling function, which avoids creating/allocating space for the
- * Control/Bulk/InterruptMessage lambda.
+ * the calling function, which avoids using dynamic memory.
  */
 template <class req_fn>
 static int sync_message(const req_fn &req) {
@@ -163,16 +162,16 @@ static int sync_message(const req_fn &req) {
   if (atomSemCreate(&sem, 0) == ATOM_OK) {
     int xfer_r;
     // order of operations is tricky here, follow the numbers
-    result = req([&](int r) { // 1: queue async Control/Bulk/InterruptMessage request
+    auto fn = [&](int r) {
       // USB Host thread performs this action when transfer is complete
-      xfer_r = r;    // 4: actual result of the transfer
-      atomSemPut(&sem); // 5: unblock main thread
-    });
-
+      xfer_r = r;      // 3: actual result of the transfer
+      atomSemPut(&sem); // 4: unblock main thread
+    };
+    result = req(fn); // 1: queue async Control/Bulk/InterruptMessage request
     if (result >= 0) { // 2: result of attempt to queue the transfer is checked
       if (atomSemGet(&sem, 0) == ATOM_OK) { // 3: main thread blocks
         result = xfer_r;
-        if (result < 0) { // 6: result of the transfer is checked
+        if (result < 0) { // 5: result of the transfer is checked
           errno = -result;
         }
       } else {
@@ -187,19 +186,19 @@ static int sync_message(const req_fn &req) {
 }
 
 int USB_Driver::ControlMessage(uint8_t bmRequestType, uint8_t bmRequest, uint16_t wValue, uint16_t wIndex, uint16_t wLength, void *data) {
-  return sync_message([&](const std::function<void(int)> &cb)->int {
-    return ControlMessage(bmRequestType, bmRequest, wValue, wIndex, wLength, data, cb);
+  return sync_message([=](const USBCallback &cb)->int {
+    return ControlMessage(bmRequestType, bmRequest, wValue, wIndex, wLength, data, &cb);
   });
 }
 
 int USB_Driver::BulkMessage(uint8_t bEndpoint, uint32_t dLength, void *data) {
-  return sync_message([&](const std::function<void(int)> &cb)->int {
-    return BulkMessage(bEndpoint, dLength, data, cb);
+  return sync_message([=](const USBCallback &cb)->int {
+    return BulkMessage(bEndpoint, dLength, data, &cb);
   });
 }
 
 int USB_Driver::InterruptMessage(uint8_t bEndpoint, uint16_t wLength, void *data) {
-  return sync_message([&](const std::function<void(int)> &cb)->int {
-    return InterruptMessage(bEndpoint, wLength, data, cb);
+  return sync_message([=](const USBCallback &cb)->int {
+    return InterruptMessage(bEndpoint, wLength, data, &cb);
   });
 }

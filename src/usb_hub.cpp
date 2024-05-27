@@ -4,7 +4,7 @@
 
 #define MK_BE16(a, b) (((a)<<8)|(b))
 
-class USB_Hub_Driver : public USB_Driver_FactoryGlue<USB_Hub_Driver>, private CCallback<usb_bulk_interrupt_transfer>,
+class USB_Hub_Driver : public USB_Driver_FactoryGlue<USB_Hub_Driver>,
 private CCallback<usb_control_transfer>, private USB_Hub {
 private:
   USB_Device* const dev;
@@ -13,13 +13,14 @@ private:
   // atomic refcount not needed, all access comes from the USB_Host thread
   unsigned int refcount;
   usb_hub_descriptor hub_desc;
-  uint8_t __attribute__((aligned(32))) port_change[1];
+  uint8_t __attribute__((aligned(32))) port_change[32];
 
   USB_Hub_Driver(USB_Device*,uint8_t status);
 
+  const USBCallback interrupt_cb = [=](int r) {int_callback(r);};
   void detach(void);
-  void callback(usb_bulk_interrupt_transfer*,int);
-  void callback(usb_control_transfer*,int);
+  void int_callback(int);
+  void callback(const usb_control_transfer*,int);
 
   void port_power(uint8_t,bool);
   void port_reset(uint8_t,bool);
@@ -105,7 +106,7 @@ USB_Driver* USB_Hub_Driver::attach_config(const usb_device_descriptor *d, const 
   return NULL;
 }
 
-void USB_Hub_Driver::callback(usb_bulk_interrupt_transfer* t, int result) {
+void USB_Hub_Driver::int_callback(int result) {
   if (result >= 1) {
     dprintf("Hub<%p>: hub interrupt %02X (%d)\n", this, port_change[0], result);
     for (uint8_t i=1; i <= hub_desc.bNbrPorts; i++) {
@@ -121,7 +122,7 @@ void USB_Hub_Driver::callback(usb_bulk_interrupt_transfer* t, int result) {
   dprintf("Hub<%p>: polling error (%d)\n", this, result);
 }
 
-void USB_Hub_Driver::callback(usb_control_transfer *t, int result) {
+void USB_Hub_Driver::callback(const usb_control_transfer *t, int result) {
   dprintf("Hub<%p> control callback: %d\n", this, result);
   if (result < 0)
     return;
@@ -218,7 +219,7 @@ void USB_Hub_Driver::deref(void) {
 }
 
 void USB_Hub_Driver::do_poll(void) {
-  dev->InterruptTransfer(status_ep, sizeof(port_change), port_change, this);
+  dev->InterruptTransfer(status_ep, 1, port_change, &interrupt_cb);
 }
 
 void USB_Hub_Driver::request_status(uint8_t port) {
