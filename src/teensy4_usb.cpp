@@ -164,14 +164,15 @@ static int sync_message(const req_fn &req) {
     // order of operations is tricky here, follow the numbers
     auto fn = [&](int r) {
       // USB Host thread performs this action when transfer is complete
-      xfer_r = r;      // 3: actual result of the transfer
-      atomSemPut(&sem); // 4: unblock main thread
+      xfer_r = r;         // 4: actual result of the transfer is stored
+      atomSemPut(&sem);   // 5: unblock main thread
     };
-    result = req(fn); // 1: queue async Control/Bulk/InterruptMessage request
-    if (result >= 0) { // 2: result of attempt to queue the transfer is checked
-      if (atomSemGet(&sem, 0) == ATOM_OK) { // 3: main thread blocks
+    result = req(fn);     // 1: queue async Control/Bulk/InterruptMessage request
+    if (result >= 0) {    // 2: result of attempt to queue the transfer is checked
+      if (atomSemGet(&sem, 0) == ATOM_OK) {
+                          // 3: main thread blocked on semaphore
         result = xfer_r;
-        if (result < 0) { // 5: result of the transfer is checked
+        if (result < 0) { // 6: result of the transfer is checked
           errno = -result;
         }
       } else {
