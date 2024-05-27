@@ -21,6 +21,7 @@
 #define USB_REQTYPE_ENDPOINT_GET         (USB_CTRLTYPE_DIR_DEVICE2HOST|USB_CTRLTYPE_TYPE_STANDARD|USB_CTRLTYPE_REC_ENDPOINT)
 #define USB_REQTYPE_ENDPOINT_SET         (USB_CTRLTYPE_DIR_HOST2DEVICE|USB_CTRLTYPE_TYPE_STANDARD|USB_CTRLTYPE_REC_ENDPOINT)
 
+/* standard requests */
 #define USB_REQ_GET_STATUS               0
 #define USB_REQ_CLEAR_FEATURE            1
 #define USB_REQ_SET_FEATURE              3
@@ -29,6 +30,9 @@
 #define USB_REQ_SET_CONFIGURATION        9
 #define USB_REQ_GET_INTERFACE            10
 #define USB_REQ_SET_INTERFACE            11
+
+/* non-standard (class) requests */
+#define USB_REQ_SETPROTOCOL              11
 
 #define USB_FEATURE_ENDPOINT_HALT        0
 
