@@ -58,6 +58,19 @@ static void check_sense(USB_Storage *usbms, uint8_t lun) {
   else Serial.printf("Failed to retrieve sense data: %d\n", errno);
 }
 
+int read_cdda(USB_Storage *usbms, uint8_t lun, uint64_t lba, uint32_t cnt, void* data, size_t len) {
+  uint8_t cmd[12] = {0xBE, 1<<2}; // SCSI_READ_CD, format = CD-DA
+  cmd[2] = (uint8_t)(lba >> 24);
+  cmd[3] = (uint8_t)(lba >> 16);
+  cmd[4] = (uint8_t)(lba >> 8);
+  cmd[5] = (uint8_t)(lba >> 0);
+  cmd[6] = (uint8_t)(cnt >> 16);
+  cmd[7] = (uint8_t)(cnt >> 8);
+  cmd[8] = (uint8_t)(cnt >> 0);
+  cmd[9] = 0xF0;
+  return usbms->scsi_cmd(lun, data, len, cmd, false);
+}
+
 #define TEST_SIZE 65536
 static void run_test(USB_Storage *usbms, uint8_t lun, uint64_t sectors, uint32_t sector_size) {
   static DMAMEM uint8_t test_buf[TEST_SIZE] __attribute__((aligned(32)));
@@ -76,7 +89,11 @@ static void run_test(USB_Storage *usbms, uint8_t lun, uint64_t sectors, uint32_t
   Serial.printf("Testing %s %s LUN %u, please wait approx. 10 seconds...", vendor.c_str(), product.c_str(), lun);
   elapsedMillis timer = 0;
   do {
-    int r = usbms->read(lun, s, cnt, test_buf, test_len);
+    int r;
+    if (sector_size!=2352)
+      r = usbms->read(lun, s, cnt, test_buf, test_len);
+    else
+      r = read_cdda(usbms, lun, s, cnt, test_buf, test_len);
     if (r != (int)test_len) {
       Serial.printf("Error while reading sector %llu cnt %u: %d %d\n", s, cnt, r, errno);
       if (errno == EBUSY) {
