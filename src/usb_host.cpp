@@ -109,13 +109,15 @@ void QH_Base::update(void) {
       if (ret && IS_QTD_PTR_VALID(t->alt)) {
         pending = static_cast<usb_transfer*>(t->alt);
         while (t->cb == NULL) {
-      usb_transfer *n = static_cast<usb_transfer*>(t->next);
-      delete t;
-      ret += n->token.total;
-      t = n;
-    }
-      } else
+          usb_transfer *n = static_cast<usb_transfer*>(t->next);
+          delete t;
+          ret += n->token.total;
+          t = n;
+        }
+      }
+      else {
         pending = static_cast<usb_transfer*>(t->next);
+      }
     }
 
     if (t->cb) {
@@ -237,6 +239,14 @@ uint64_t usb_control_transfer::getSetupData(void) const {
   return MK_SETUP64(req.bmRequestType, req.bmRequest, req.wValue, req.wIndex, req.wLength);
 }
 
+void USB_Async_Endpoint::set_link(const USB_Async_Endpoint* p) {
+  uint32_t old_link = horizontal_link;
+  if (old_link != 1) cache_invalidate(&horizontal_link);
+  horizontal_link = p->link_to();
+  if (old_link == 1) clean_after_write();
+  else cache_flush_invalidate(&horizontal_link);
+}
+
 void USB_Control_Endpoint::transfer::callback(const usb_transfer*, int result) {
   if (result >= 0 && req.wLength) {
     result = req.wLength - data.token.total;
@@ -273,7 +283,7 @@ void *_buffer, CCallback<usb_control_transfer>* _cb, bool release_mem) : cb(_cb)
 }
 
 USB_Control_Endpoint::USB_Control_Endpoint(uint8_t max_packet_size, uint8_t address, uint8_t hub, uint8_t port, uint8_t speed) :
-USB_QH_Endpoint(0, max_packet_size, hub, port, address, speed, USB_ENDPOINT_CONTROL) {
+USB_Async_Endpoint(0, max_packet_size, hub, port, address, speed, USB_ENDPOINT_CONTROL) {
   if (speed < 2) capabilities.C = 1;
   capabilities.DTC = 1;
 }
@@ -336,7 +346,7 @@ void usb_bulk_interrupt_transfer::callback(const usb_transfer *t, int result) {
   (*cbi)(result);
 }
 
-usb_bulk_interrupt_transfer::usb_bulk_interrupt_transfer(bool _dir_in, uint32_t length, void *_buffer, const USBCallback* _cb) :
+usb_bulk_interrupt_transfer::usb_bulk_interrupt_transfer(bool _dir_in, uint32_t length, void *_buffer, const USBCallback* _cb, uint32_t max_packet) :
 cbi(_cb) {
   buffer = _buffer;
   dlength = length;
@@ -355,18 +365,25 @@ cbi(_cb) {
   if (length0 >= length)
     fill_qtd(this, NULL, true, length, true, PID, buffer);
   else {
+    /* cascaded transfers must ensure their lengths are multiples of wMaxPacketSize
+     * else the device may trigger babble
+     */
+    length0 -= length0 % max_packet;
     const uint8_t* b = (const uint8_t*)buffer + length0;
     length -= length0;
     error_handler = &extra[2];
     fill_qtd(&extra[2], this, true, length0, false, PID, buffer);
+    length0 = 5*4096 - ((uint32_t)b & 0xFFF);
     cb = extra[0].cb = extra[1].cb = NULL;
-    if (length > 5* 4096) {
+    if (length > length0) {
       next = &extra[0];
       size_t i=0;
-      while (length > 5*4096) {
-        extra[i].fill_qtd(&extra[i+1], this, true, 5*4096, false, PID, b);
-        b += 5*4096;
-        length -= 5*4096;
+      while (length > length0) {
+        length0 -= length0 % max_packet;
+        extra[i].fill_qtd(&extra[i+1], this, true, length0, false, PID, b);
+        b += length0;
+        length -= length0;
+        length0 = 5*4096 - ((uint32_t)b & 0xFFF);
         i++;
       }
       extra[i-1].next = &extra[2];
@@ -381,7 +398,7 @@ int QH_Base::BulkIntrTransfer(bool dir_in, uint32_t Length, void *buffer, const 
     dprintf("bulk_interrupt transfer too big\n");
     errno = E2BIG;
   } else {
-    usb_transfer *msg = new(std::nothrow) usb_bulk_interrupt_transfer(dir_in, Length, buffer, cb);
+    usb_transfer *msg = new(std::nothrow) usb_bulk_interrupt_transfer(dir_in, Length, buffer, cb, capabilities.wMaxPacketSize);
     if (msg == NULL) {
       errno = ENOMEM;
     } else {
@@ -393,8 +410,22 @@ int QH_Base::BulkIntrTransfer(bool dir_in, uint32_t Length, void *buffer, const 
   return -1;
 }
 
-USB_Interrupt_Endpoint::USB_Interrupt_Endpoint(uint8_t endpoint, uint16_t max_packet_size, uint8_t address, uint8_t hub_addr, uint8_t port, uint8_t speed, uint32_t i)
-: USB_Bulk_Interrupt_Endpoint(endpoint, max_packet_size, address, hub_addr, port, speed, USB_ENDPOINT_INTERRUPT) {
+PeriodicScheduler::PeriodicScheduler(volatile uint32_t& frindex) :
+FRINDEX(frindex) {
+  periodictable = (uint32_t*)aligned_alloc(4096, sizeof(uint32_t)*PERIODIC_LIST_SIZE);
+
+  dprintf("PERIODIC_LIST_SIZE: %d (%p)\n", PERIODIC_LIST_SIZE, periodictable);
+  for (int i=0; i < PERIODIC_LIST_SIZE; i++)
+    periodictable[i] = 0x80000001;
+  cache_flush(periodictable, sizeof(periodictable[0])*PERIODIC_LIST_SIZE);
+}
+
+PeriodicScheduler::~PeriodicScheduler() {
+  free(periodictable);
+}
+
+USB_Interrupt_Endpoint::USB_Interrupt_Endpoint(uint8_t endpoint, uint16_t max_packet_size, uint8_t address, uint8_t hub_addr, uint8_t port, uint8_t speed, uint32_t i) :
+USB_Bulk_Interrupt_Endpoint(endpoint, max_packet_size, address, hub_addr, port, speed, USB_ENDPOINT_INTERRUPT) {
   // worse cast bit stuffing = 7/6ths. Includes CRC16 in bitstuffing plus packet structure
   uint32_t maxlen = (((capabilities.wMaxPacketSize+2) * 298) >> 8) + 5+12;
   uint32_t data_time = (19 + 17 + maxlen + 31) >> 5;
@@ -434,6 +465,30 @@ USB_Interrupt_Endpoint::USB_Interrupt_Endpoint(uint8_t endpoint, uint16_t max_pa
   }
 }
 
+void USB_Interrupt_Endpoint::new_offset(void) {
+  // update masks
+  switch (interval) {
+    case 1:
+      capabilities.s_mask = 0xFF;
+      break;
+    case 2:
+      capabilities.s_mask = 0x55 << (offset & 1);
+      break;
+    case 4:
+      capabilities.s_mask = 0x11 << (offset & 3);
+      break;
+    default:
+      capabilities.s_mask <<= (offset & 7);
+      capabilities.c_mask <<= (offset & 7);
+  }
+  clean_after_write();
+
+  uint32_t f_interval = (interval > 8) ? (interval >> 3) : 1;
+  for (uint32_t i=offset>>3; i < PERIODIC_LIST_SIZE; i += f_interval) {
+    add_node(i, link_to(), interval);
+  }
+}
+
 bool USB_Interrupt_Endpoint::set_inactive(void) {
   sync_before_read();
   if (capabilities.speed != 2 && capabilities.I == 0) {
@@ -442,28 +497,23 @@ bool USB_Interrupt_Endpoint::set_inactive(void) {
     clean_after_write();
     return true;
   }
-  return false;
+
+  bool was_removed = false;
+  uint32_t f_interval = (interval > 8) ? (interval >> 3) : 1;
+  for (uint32_t i=offset>>3; i < PERIODIC_LIST_SIZE; i += f_interval) {
+    if (remove_node(i, link_to(), horizontal_link))
+      was_removed = true;
+  }
+
+  return was_removed;
 }
 
-USB_ISO_Endpoint::USB_ISO_Endpoint(uint8_t endpoint, uint16_t max_packet_size, uint8_t _address, uint8_t hub_addr, uint8_t _port, uint32_t i)
-: USB_Periodic_Endpoint(horizontal_link, 4, USB_ENDPOINT_ISOCHRONOUS), dir_in(endpoint & 0x80) {
-  // initialize siTD
-  memset(&horizontal_link, 0, sizeof(usb_siTD_t));
-  horizontal_link = 1;
-  address = _address;
-  endpt = endpoint;
-  hub = hub_addr;
-  port = _port;
-  dir = dir_in ? 1:0;
-  page1 = ((uint32_t)(buffer+4096)) >> 12;
-  back_pointer = 1;
-  // TP, T-count not initialized here; they are written at the beginning of each transfer
-
+USB_ISO_Endpoint::USB_ISO_Endpoint(uint8_t endpoint, uint16_t max_packet_size, uint8_t address, uint8_t hub_addr, uint8_t port, uint32_t i) :
+USB_Periodic_Endpoint(USB_ENDPOINT_ISOCHRONOUS),
+dir_in(endpoint & 0x80) {
   wMaxPacketSize = max_packet_size & 0x7FF;
   if (wMaxPacketSize >= 1024) wMaxPacketSize = 1023;
 
-  // worse case bit stuffing = 7/6ths. Includes CRC16 in bitstuffing plus packet structure
-  uint32_t maxlen = (((wMaxPacketSize+2) * 298) >> 8) + 5+12;
   if (i > 16) i = 16;
   i = 1 << (i - 1);
 
@@ -471,36 +521,217 @@ USB_ISO_Endpoint::USB_ISO_Endpoint(uint8_t endpoint, uint16_t max_packet_size, u
     i = PERIODIC_LIST_SIZE;
   interval = i << 3;
 
-  uint32_t num_transfers = (wMaxPacketSize+187) / 188;
+  // worse case bit stuffing = 7/6ths. Includes CRC16 in bitstuffing plus packet structure
+  uint32_t maxlen = (((wMaxPacketSize+2) * 298) >> 8) + 5+12;
+  uint32_t num_transfers = (wMaxPacketSize*2 + 374) / 375;
   maxlen = (19 + 17 + maxlen + 31) >> 5;
   // SSPLIT and CSPLIT use 4 byte tokens, one byte larger than IN/OUT
   // Full/Low IN/OUT are 3 bytes smaller than High (16 vs 9)
+
+  /* See usb_20.pdf page 375 onwards for start/complete split scheduling
+   * restrictions
+   */
   if (dir_in) {
     stime = (20 + 16 + 31) >> 5;              // S-SPLIT -> Full/Low IN
     ctime = maxlen;
     s_mask = 1;
-    c_mask = ((4 << num_transfers) - 1) << 2;
+    if (num_transfers > 4) num_transfers = 4;
+    c_mask = (16 << num_transfers) - 4;
   } else {
     stime = maxlen;
-    s_mask = (4 << num_transfers) - 1;
+    s_mask = (1 << num_transfers) - 1;
+    c_mask = 0;
+  }
+
+  memset(&state, 0, sizeof(state));
+  state.address = address;
+  state.endpt = endpoint;
+  state.hub = hub_addr;
+  state.port = port;
+  state.dir = dir_in ? 1:0;
+}
+
+USB_ISO_Endpoint::~USB_ISO_Endpoint() {
+  while (pending) {
+    sitd_transfer *t = pending;
+    pending = t->next;
+    remove_node(t->frame>>3, t->link_to(), t->horizontal_link);
+
+    t->cb->callback(t, -ENODEV);
+  }
+  dprintf("USB_ISO_Endpoint<%p> deleted\n");
+}
+
+void USB_ISO_Endpoint::new_offset(void) {
+  dprintf("ISO_Endpoint<%p>: new_offset %d\n", this, offset);
+  s_mask <<= (offset & 7);
+  c_mask <<= (offset & 7);
+}
+
+class sitd_group : public CCallback<sitd_transfer> {
+private:
+  const USBCallback *cb;
+  int done;
+
+  void callback(const sitd_transfer*,int r) override {
+    if (++done >= total) {
+      (*cb)(r);
+      delete(this);
+    }
+  }
+public:
+  int total;
+
+  sitd_group(const USBCallback *_cb) :
+  cb(_cb) {
+    done = 0;
+  }
+
+  sitd_transfer* get_transfers(void) {
+    size_t p = (size_t)(this+1);
+    p = (p+31) & ~31;
+    return (sitd_transfer*)p;
+  }
+
+  static void* operator new(size_t s, isolength* l) noexcept(true) {
+    size_t t_count;
+    for (t_count=0; t_count < 8; t_count++) {
+      if ((*l)[t_count]==0)
+        break;
+    }
+    s = (s + 31) & ~31;
+    return aligned_alloc(32, s + t_count*sizeof(sitd_transfer));
+  }
+};
+
+void USB_ISO_Endpoint::update(void) {
+  while (pending) {
+    sitd_transfer *t = pending;
+
+    cache_invalidate(t);
+    if (t->status & 0x80) return;
+    if (t->status & 0x7C)
+      dprintf("Possible ISO transfer error: %02X\n", t->status);
+    // todo: handle errors
+
+    pending = t->next;
+    remove_node(t->frame>>3, t->link_to(), t->horizontal_link);
+
+    uint16_t length = *t->length - t->total;
+
+    if (dir_in) {
+      cache_invalidate(t->buffer, length);
+    }
+
+    *t->length = length;
+    t->cb->callback(t,length);
   }
 }
 
-void USB_ISO_Endpoint::update(void) {}
-void USB_ISO_Endpoint::flush(void) {}
+int USB_ISO_Endpoint::IsochronousTransfer(isolength* pLength, void *buffer, const USBCallback* cb) {
+  sitd_group *sg = new(pLength) sitd_group(cb);
+  if (sg == NULL) errno = ENOMEM;
+  else {
+    sitd_transfer* t = sg->get_transfers();
+    uint8_t* dst = (uint8_t*)buffer;
+    int16_t *Lengths = *pLength;
+    int i;
+    for (i=0; i < 8; i++) {
+      if (Lengths[i] == 0) break;
+      if (Transfer(t, &Lengths[i], dst, sg) < 0) {
+        dprintf("Failed to schedule transfer %u\n", i);
+        break;
+      }
+      dst += Lengths[i];
+      t++;
+    }
+    if (i > 0) {
+      sg->total = i;
+      return 0;
+    }
 
-void USB_ISO_Endpoint::set_masks(uint8_t smask, uint8_t cmask) {
-  s_mask = smask;
-  c_mask = cmask;
-  cache_flush_invalidate(&horizontal_link, sizeof(usb_sitd_transfer));
+    delete sg;
+  }
+  return -1;
+}
+
+int USB_ISO_Endpoint::Transfer(sitd_transfer *t, int16_t *Length, void *buffer, CCallback<sitd_transfer>* cb) {
+  memset(t, 0, sizeof(usb_siTD_t));
+  t->horizontal_link = 1;
+  t->state = state;
+  t->s_mask = s_mask;
+  t->c_mask = c_mask;
+  t->status = 0x80;
+  t->total = *Length;
+  t->IOC = 1;
+
+  t->buffer = t->page0 = buffer;
+  t->page1 = (((uint32_t)buffer)>>12)+1;
+
+  t->t_count = __builtin_popcount(s_mask);
+  t->back_pointer = 1;
+
+  t->cb = cb;
+  t->length = Length;
+  t->next = NULL;
+
+  // this may take a while so do it before fetching the current uframe index
+  cache_flush_invalidate(buffer, *Length);
+
+  uint32_t uframe_now = current_uframe();
+  // this is the cut-off point for scheduling: a full list period from now
+  uint32_t uframe_max = (uframe_now & ~7) + PERIODIC_LIST_SIZE*8 - 8;
+  // this is the earliest allowed: at least 1 full frame ahead
+  uint32_t uframe_min = (uframe_now + 9) & ~7;
+  uint32_t uframe_cur = uframe_min;
+  if (pending) {
+    // insert after all pending transfers
+    sitd_transfer *p = pending;
+    while (p->next) p = p->next;
+    uint32_t f = p->frame;
+    if (f < uframe_now) {
+      f += PERIODIC_LIST_SIZE*8;
+    }
+    if (f < uframe_max) {
+      f += interval;
+      if (f > uframe_cur) uframe_cur = f;
+    }
+  }
+  t->frame = (uframe_cur & (~interval + 1)) + offset;
+  // 1x interval correction may be needed
+  if (t->frame < uframe_cur)
+    t->frame += interval;
+
+//  dprintf("ISO transfer<%p>: uframe_now %lu:%lu, scheduled %lu:%lu, uframe_min %lu:%lu, uframe_max %lu:%lu\n", t, uframe_now>>3, uframe_now&7, t->frame>>3, t->frame&7, uframe_min>>3, uframe_min&7, uframe_max>>3, uframe_max&7);
+
+  // did we find a suitable time-slot?
+  if (uframe_min <= t->frame && t->frame < uframe_max) {
+    t->frame = t->frame % (PERIODIC_LIST_SIZE*8);
+
+    if (add_node(t->frame>>3, t->link_to(), 0xFFFFFFFF)) {
+      sitd_transfer** p = &pending;
+      while (*p) p = &(*p)->next;
+      *p = t;
+      return 0;
+    }
+    errno = ENOBUFS;
+  }
+  else errno = EBUSY;
+  dprintf("Failed to add node: uframe_now %lu:%lu, scheduled %lu:%lu, uframe_min %lu:%lu, uframe_max %lu:%lu, uframe_cur %lu:%lu\n", uframe_now>>3, uframe_now&7, t->frame>>3, t->frame&7, uframe_min>>3, uframe_min&7, uframe_max>>3, uframe_max&7, uframe_cur>>3, uframe_cur&7);
+  if (pending) {
+    dprintf("PENDING:");
+    sitd_transfer *p = pending;
+    while (p) {
+      dprintf(" %lu:%lu", p->frame>>3, p->frame&7);
+      p = p->next;
+    }
+    dprintf("\n");
+  }
+  return -1;
 }
 
 USB_Hub::USB_Hub(uint8_t addr) : hub_addr(addr) {
-  for (size_t i=0; i < sizeof(port)/sizeof(port[0]); i++) {
-    port[i].state = 0;
-    port[i].device = NULL;
-    port[i].timeout_start = 0;
-  }
+  memset(port, 0, sizeof(port));
 }
 
 USB_Device::dev_interface::setting::setting(const uint8_t *i, const uint8_t *end) : interface_desc((const usb_interface_descriptor*)i) {
@@ -827,9 +1058,9 @@ void USB_Device::USBMessage(const usb_msg_t& msg) {
       deref();
       break;
     case USB_MSG_DEVICE_ISOCHRONOUS_TRANSFER:
-      //IsochronousTransfer();
-      (*msg.device.cb)(-EOPNOTSUPP);
+      IsochronousTransfer(msg.device.iso.bEndpoint, msg.device.iso.lengths, msg.device.iso.data, msg.device.cb);
       deref();
+      break;
     default:
       dprintf("Unknown USB Device message: %d\n", msg.type);
   }
@@ -919,6 +1150,10 @@ void USB_Device::activate_endpoint(const usb_endpoint_descriptor* p) {
       break;
 
     case USB_ENDPOINT_ISOCHRONOUS:
+      if (p->wMaxPacketSize == 0) {
+        dprintf("activate_endpoint: ISO endpoint has wMaxPacketSize==0, skipping\n");
+        return;
+      }
       refcount.fetch_add(1);
       Endpoints[i].ep = new(std::nothrow) USB_ISO_Endpoint(p->bEndpointAddress, p->wMaxPacketSize, address, hub_addr, port, p->bInterval);
       if (Endpoints[i].ep != NULL) {
@@ -1210,6 +1445,15 @@ void USB_Device::InterruptTransfer(uint8_t bEndpoint, uint32_t dLength, void *da
   (*cb)(-errno);
 }
 
+void USB_Device::IsochronousTransfer(uint8_t bEndpoint, isolength* Lengths, void *data, const USBCallback* cb) {
+  if (Endpoints[bEndpoint].type == USB_ENDPOINT_ISOCHRONOUS) {
+    if (Endpoints[bEndpoint].ep->IsochronousTransfer(Lengths, data, cb) == 0)
+      return;
+  }
+  else errno = ENXIO;
+  (*cb)(-errno);
+}
+
 bool USB_Device::pushMessage(usb_msg_t& msg) {
   switch (msg.type) {
     case USB_MSG_DEVICE_CONTROL_TRANSFER:
@@ -1340,10 +1584,33 @@ int USB_Driver::InterruptMessage(uint8_t bEndpoint, uint16_t wLength, void *data
   return -1;
 }
 
+int USB_Driver::IsochronousMessage(uint8_t bEndpoint, isolength* Lengths, void *data, const USBCallback* cb_func) {
+  usb_msg_t msg = {
+    .type = USB_MSG_DEVICE_ISOCHRONOUS_TRANSFER,
+    .device = {
+      .cb = cb_func,
+      .iso = {
+        .bEndpoint = bEndpoint,
+        .lengths = Lengths,
+        .data = data
+      }
+    }
+  };
+  if (device == NULL) errno = ENOENT;
+  else if ((*Lengths)[0] == 0) errno = EINVAL;
+  else {
+    if (device->pushMessage(msg))
+      return 0;
+    errno = ENOMEM;
+  }
+  return -1;
+}
+
 class FuncWrapper {
 private:
   const USBCallback base;
 public:
+
   const USBCallback wrap = [=](int r) {
     base(r);
     delete this;
@@ -1375,25 +1642,42 @@ int USB_Driver::InterruptMessage(uint8_t bEndpoint, uint16_t wLength, void *data
   return -1;
 }
 
+int USB_Driver::IsochronousMessage(uint8_t bEndpoint, isolength* Lengths, void *data, USBCallback cb_func) {
+  FuncWrapper* cb = new (std::nothrow) FuncWrapper(cb_func);
+  if (cb == NULL) {
+    errno = ENOMEM;
+  } else {
+    if (IsochronousMessage(bEndpoint, Lengths, data, &cb->wrap) >= 0)
+      return 0;
+    delete cb;
+  }
+  return -1;
+}
+
 // synchronous functions - not implemented here, these use weak symbols so they can be overridden using OS specific code
 __attribute__((weak)) int USB_Driver::ControlMessage(uint8_t bmRequestType, uint8_t bmRequest, uint16_t wValue, uint16_t wIndex, uint16_t wLength, void *data) {
   errno = ENOSYS;
   return -1;
 }
 
-__attribute__((weak)) int USB_Driver::BulkMessage(uint8_t bEndpoint, uint32_t dLength, void *data) {
+__attribute__((weak)) int USB_Driver::BulkMessage(uint8_t,uint32_t,void*) {
   errno = ENOSYS;
   return -1;
 }
 
-__attribute__((weak)) int USB_Driver::InterruptMessage(uint8_t bEndpoint, uint16_t wLength, void *data) {
+__attribute__((weak)) int USB_Driver::InterruptMessage(uint8_t,uint16_t,void*) {
+  errno = ENOSYS;
+  return -1;
+}
+
+__attribute__((weak)) int USB_Driver::IsochronousMessage(uint8_t,isolength*,void*) {
   errno = ENOSYS;
   return -1;
 }
 
 USB_Host::Enum_Control::Enum_Control() : USB_Control_Endpoint(64, 0, 0, 0, 0) {
   // first pipe, link to self
-  horizontal_link = link_to;
+  set_link(this);
   capabilities.H = 1;
 
   in_progress = false;
@@ -1680,32 +1964,29 @@ void USB_Host::update_transfers(void) {
   }
 }
 
-void USB_Host::add_async_queue(USB_Endpoint *ep) {
+void USB_Host::add_async_queue(USB_Async_Endpoint *ep) {
   Enum.sync_before_read();
-  ep->hlink = Enum.hlink;
+  ep->set_link(Enum.get_link());
   // this is typically where an endpoint is first activated so flush the entire queue head
-  cache_flush_invalidate(&ep->hlink, sizeof(usb_queue_head_t));
-  Enum.hlink = ep->link_to;
-  cache_flush_invalidate(&Enum.hlink);
+  Enum.set_link(ep);
+  Enum.clean_after_write();
   ep->host_next = endpoints;
   endpoints = ep;
 }
 
-bool USB_Host::remove_async_queue(USB_Endpoint *ep) {
+bool USB_Host::remove_async_queue(USB_Async_Endpoint *ep) {
   dprintf("Removing async USB_Endpoint %p\n", ep);
 
-  uint32_t qh = ep->link_to;
-  uint32_t* prev = &Enum.hlink;
-  while (*prev != qh) {
-  if (*prev == Enum.link_to) {
-      dprintf("Can't removed USB_Endpoint %p, not found in async list\n", ep);
+  USB_Async_Endpoint* prev = &Enum;
+  while (prev->get_link() != ep) {
+    if (prev->get_link() == &Enum) {
+      dprintf("Can't remove USB_Async_Endpoint %p, not found in async list\n", ep);
       return false;
+    }
+    prev = prev->get_link();
   }
-  prev = (uint32_t*)(*prev & ~0x1F);
-  }
-  cache_invalidate(prev);
-  *prev = ep->hlink;
-  cache_flush_invalidate(prev);
+  prev->set_link(ep->get_link());
+
   // remove from active endpoint list
   USB_Endpoint **p = &endpoints;
   while (*p != NULL) {
@@ -1726,65 +2007,6 @@ bool USB_Host::remove_async_queue(USB_Endpoint *ep) {
   return true;
 }
 
-bool USB_Host::calculate_offset(USB_Periodic_Endpoint *ep, uint32_t &offset) const {
-  const uint32_t interval = ep->interval;
-  const uint32_t stime = ep->stime;
-  const uint32_t ctime = ep->ctime;
-  uint8_t s_mask, c_mask;
-  ep->get_masks(s_mask, c_mask);
-
-  uint32_t best_bandwidth = 0xFFFFFFFF;
-  // for each possible uframe offset, find the worst uframe_bandwidth
-  for (uint32_t off=0; off < interval; off++) {
-    // low/full speed can't have splits across frames
-    if ((s_mask << (off&7)) >= 256)
-      continue;
-    if ((c_mask << (off&7)) >= 256)
-      continue;
-    uint32_t max_bandwidth = 0;
-    for (uint32_t i=off; i < PERIODIC_LIST_SIZE*8; i += interval) {
-      uint32_t umax = max_bandwidth;
-      for (uint8_t j=0; j < 8; j++) {
-        if ((s_mask | c_mask) & (1<<j)) {
-          uint32_t bw = uframe_bandwidth[(i+j) % (PERIODIC_LIST_SIZE*8)];
-          if (s_mask & (1<<j))
-            bw += stime;
-          if (c_mask & (1<<j))
-            bw += ctime;
-          if (bw > umax) umax = bw;
-        }
-      }
-      if (umax > max_bandwidth) max_bandwidth = umax;
-    }
-    // remember which uframe offset is the best
-    if (max_bandwidth < best_bandwidth) {
-      best_bandwidth = max_bandwidth;
-      offset = off;
-    }
-  }
-  // fail if the best found needs more than 80% (234 * 0.8) in any uframe
-  if (best_bandwidth > 187) return false;
-  switch (interval) {
-    case 1:
-      s_mask = 0xFF;
-      break;
-    case 2:
-      s_mask = 0x55 << (offset & 1);
-      break;
-    case 4:
-      s_mask = 0x11 << (offset & 3);
-      break;
-    default:
-      s_mask <<= (offset & 7);
-      c_mask <<= (offset & 7);
-  }
-  ep->set_masks(s_mask, c_mask);
-  offset >>= 3;
-//  dprintf("Endpoint<%p> speed %d interval %lu offset %lu stime %lu ctime %lu s_mask %02X c_mask %02X\n", ep, ep->capabilities.speed, interval, offset, stime, ctime, s_mask, c_mask);
-  dprintf("Endpoint<%p> interval %lu offset %lu stime %lu ctime %lu s_mask %02X c_mask %02X\n", ep, interval, offset, stime, ctime, s_mask, c_mask);
-  return true;
-}
-
 void USB_Host::notify_endpoint_removed(USB_Endpoint *ep) {
   usb_msg_t msg = {
     .type = USB_MSG_DEVICE_ENDPOINT_REMOVED,
@@ -1797,71 +2019,160 @@ void USB_Host::notify_endpoint_removed(USB_Endpoint *ep) {
 }
 
 void USB_Host::unschedule_periodic(void) {
-  uint8_t s_mask, c_mask;
-
   if (periodic_cleanup == NULL) return;
   USB_Periodic_Endpoint *ep = static_cast<USB_Periodic_Endpoint*>(periodic_cleanup);
-  ep->get_masks(s_mask, c_mask);
-
-  if (s_mask == 0) {
-    // endpoint has been removed from schedule and the frame index has rolled over
-    // so it should be completely safe to remove now
-    dprintf("unschedule: safe to remove %p\n", ep);
-    periodic_cleanup = ep->host_next;
-    notify_endpoint_removed(ep);
-    return;
-  }
 
   // low/full speed endpoints must be inactive to ensure split transactions aren't interrupted
   if (ep->set_inactive() == true)
     return;
 
-  uint32_t uqh = ep->link_to;
+  uint8_t s_mask, c_mask;
+  ep->get_masks(s_mask, c_mask);
+
   uint8_t stime = ep->stime;
   uint8_t ctime = ep->ctime;
   const uint32_t f_interval = (ep->interval > 8) ? (ep->interval>>3) : 1; // uframes -> frames
-  /* start with an interval of 1, once we find the first
-   * occurrence use the actual interval
-   */
-  uint32_t interval = 1;
-  for (uint32_t offset=0; offset < PERIODIC_LIST_SIZE; offset += interval) {
-    uint32_t *h = periodictable+offset;
-    while ((*h & 1) == 0) {
-      if (*h == uqh) {
-        // unlink ep from this frame
-        dprintf("unschedule: endpoint %p removed from frame %lu (%08lX)\n", ep, offset, ep->hlink);
-        cache_invalidate(h);
-        *h = ep->hlink;
-        cache_flush_invalidate(h);
-        interval = f_interval;
-        break;
+
+  for (uint32_t i=ep->offset >> 3; i < PERIODIC_LIST_SIZE; i += f_interval) {
+    for (uint8_t j=0; j < 8; j++) {
+      // assumes s_mask and c_mask don't overlap
+      if (s_mask & (1<<j)) {
+        uframe_bandwidth[i*8+j] -= stime;
+        dprintf("bandwidth[%u:%u] = %u\n", i, j, uframe_bandwidth[i*8+j]);
       }
-      h = (uint32_t*)(*h & ~0x1F);
-    }
-    /* endpoint may have already been removed from this frame
-     * (e.g. if it's behind another node, pointing that node
-     * elsewhere may remove all later occurrences) so we
-     * adjust the bandwidth tracking separately here
-     */
-    if (interval == f_interval) {
-      for (uint8_t u=0; u < 8; u++) {
-        // assumes s_mask and c_mask don't overlap
-        if (s_mask & (1<<u)) {
-          uframe_bandwidth[offset*8+u] -= stime;
-          dprintf("bandwidth[%u:%u] = %u\n", offset, u, uframe_bandwidth[offset*8+u]);
-        }
-        if (c_mask & (1<<u)) {
-          uframe_bandwidth[offset*8+u] -= ctime;
-          dprintf("bandwidth[%u:%u] = %u\n", offset, u, uframe_bandwidth[offset*8+u]);
-        }
+      if (c_mask & (1<<j)) {
+        uframe_bandwidth[i*8+j] -= ctime;
+        dprintf("bandwidth[%u:%u] = %u\n", i, j, uframe_bandwidth[i*8+j]);
       }
     }
   }
-  /* clear s_mask and c_mask so this endpoint cannot be scheduled.
-   * Technically this is undefined behaviour but should be fine -
-   * the masks just tell the host which uframes can be used for the pipe
-   */
-  ep->set_masks(0, 0);
+
+  // endpoint has been removed from schedule and the frame index has rolled over
+  // so it should be completely safe to remove now
+  dprintf("unschedule: safe to remove %p\n", ep);
+  periodic_cleanup = ep->host_next;
+  notify_endpoint_removed(ep);
+}
+
+uint32_t PeriodicScheduler::current_uframe(void) {
+  return FRINDEX % (PERIODIC_LIST_SIZE*8);
+}
+
+bool PeriodicScheduler::add_node(uint32_t frame, uint32_t link_to, uint32_t interval) {
+  uint32_t *hlink = (uint32_t*)(link_to & ~0x1F);
+  uint32_t *h = periodictable+frame;
+  uint32_t hnext = *hlink;
+  uint32_t next;
+  while (next = *h, (next & 1)==0) {
+    if (next == link_to) {
+      // found node already in this frame, nothing to insert
+      return false;
+    }
+    if (next == hnext) {
+      // h points to the same node as n so point h at n
+      break;
+    }
+    // insert in front of queue heads with smaller intervals, otherwise keep traversing
+    if ((next & 0x1F) == 2) { // is a queue head pointer
+      auto qh = (const usb_queue_head_t*)(next & ~0x1F);
+      uint32_t next_interval = static_cast<const USB_Interrupt_Endpoint*>(qh)->interval;
+      if (next_interval < interval)
+        break;
+    }
+    // follow horizontal link
+    h = (uint32_t*)(next & ~0x1F);
+  }
+
+  // insert node into tree
+  if (hnext == 1) {
+    // update the endpoint's horizontal link only once - all following nodes repeat with the same interval
+    *hlink = next;
+    cache_flush_invalidate(hlink);
+  } else if (next != hnext) {
+    dprintf("ERROR: node %p links to %08X instead of %08X! (frame %u)", h, next, hnext, frame);
+  }
+  cache_invalidate(h);
+  *h = link_to;
+  cache_flush_invalidate(h);
+  return true;
+}
+
+bool PeriodicScheduler::remove_node(uint32_t frame, uint32_t link_to, uint32_t hnext) {
+  uint32_t *h = periodictable+frame;
+  uint32_t next;
+  while (next = *h, (next & 1)==0) {
+    if (next == hnext) {
+      // node was already removed
+      break;
+    }
+    if (next == link_to) {
+      // unlink node from this frame
+      cache_invalidate(h);
+      *h = hnext;
+      cache_flush_invalidate(h);
+      return true;
+    }
+    // follow horizontal link
+    h = (uint32_t*)(next & ~0x1F);
+  }
+  return false;
+}
+
+bool USB_Host::calculate_offset(const USB_Periodic_Endpoint *ep, uint32_t &offset) {
+  const uint32_t interval = ep->interval;
+  const uint32_t stime = ep->stime;
+  const uint32_t ctime = ep->ctime;
+  uint8_t s_mask, c_mask;
+  ep->get_masks(s_mask, c_mask);
+
+  uint32_t best_bandwidth = 0xFFFFFFFF;
+  // for each possible uframe offset, find the worst uframe_bandwidth
+  for (uint32_t off=0; off < interval; off++) {
+    /* TODO: host must not schedule a start-split for uframe 6+8X
+     * so this function needs to know the endpoint speed to
+     * know when start-splits are in use...
+     */
+
+    // low/full speed can't split across frames
+    if ((s_mask << (off&7)) >= 256) {
+//      dprintf("offset %u not allowed due to s_mask\n", off);
+      continue;
+    }
+    if ((c_mask << (off&7)) >= 256) {
+//      dprintf("offset %u not allowed due to c_mask\n", off);
+      continue;
+    }
+    uint32_t max_bandwidth = 0;
+    for (uint32_t i=off; i < PERIODIC_LIST_SIZE*8; i += interval) {
+      uint32_t umax = max_bandwidth;
+      for (uint8_t j=0; j < 8; j++) {
+        if ((s_mask | c_mask) & (1<<j)) {
+          if ((i+j) >= PERIODIC_LIST_SIZE*8) {
+            // frame rollover not allowed
+//            dprintf("offset %u not allowed due to frame rollover\n", off);
+            umax = 0xFFFFFFFF;
+            break;
+          }
+          uint32_t bw = uframe_bandwidth[i+j];
+          if (s_mask & (1<<j))
+            bw += stime;
+          if (c_mask & (1<<j))
+            bw += ctime;
+          if (bw > umax) umax = bw;
+        }
+      }
+      if (umax > max_bandwidth) max_bandwidth = umax;
+    }
+    // remember which uframe offset is the best
+    // uses "<=" over "<" to favor last possible offset
+    if (max_bandwidth <= best_bandwidth) {
+      best_bandwidth = max_bandwidth;
+      offset = off;
+    }
+  }
+  // fail if the best found needs more than 80% (234 * 0.8) in any uframe
+  if (best_bandwidth > 187) return false;
+  return true;
 }
 
 void USB_Host::add_periodic_queue(USB_Periodic_Endpoint *ep) {
@@ -1872,70 +2183,36 @@ void USB_Host::add_periodic_queue(USB_Periodic_Endpoint *ep) {
     return;
   }
 
+  ep->activate(offset, this);
+
   const uint32_t interval = ep->interval;
   const uint32_t f_interval = (interval > 8) ? (interval>>3) : 1;
-  uint8_t s_mask, c_mask;
-  ep->get_masks(s_mask, c_mask);
-  uint32_t* ep_link = &ep->hlink;
-  uint32_t link_to = ep->link_to;
+
   uint8_t stime = ep->stime;
   uint8_t ctime = ep->ctime;
+  uint8_t s_mask, c_mask;
+  ep->get_masks(s_mask, c_mask);
+  dprintf("Endpoint<%p> interval %lu offset %lu stime %lu ctime %lu s_mask %02X c_mask %02X\n", ep, interval, offset, stime, ctime, s_mask, c_mask);
 
   /* use the interval and offset to insert the endpoint into the periodic schedule,
     * and s_mask+c_mask to update uframe_bandwidth
     * (interval and offset are milliseconds/frames)
     */
-  for (uint32_t i=offset; i < PERIODIC_LIST_SIZE; i += f_interval) {
-    uint32_t* h = periodictable+i;
-    while ((*h & 1)==0 && h!=ep_link) {
-      uint32_t next = *h;
-      // insert in front of queue heads with smaller intervals, otherwise keep traversing
-      if ((next & 0x1F) == 2) { // queue head
-        auto qh = (const usb_queue_head_t*)(next & ~0x1F);
-        uint32_t prev_interval = static_cast<const USB_Interrupt_Endpoint*>(qh)->interval;
-        dprintf("Comparing qh interval: %u vs %u\n", prev_interval, interval);
-        if (prev_interval < interval)
-          break;
-      }
-      // go to next / follow horizontal
-      h = (uint32_t*)(next & ~0x1F);
-    }
-
+  for (uint32_t i=offset>>3; i < PERIODIC_LIST_SIZE; i += f_interval) {
     // update uframe_bandwidth
     for (uint32_t j=0; j < 8; j++) {
       uint32_t mask = 1<<j;
       if (mask & s_mask) {
         uframe_bandwidth[i*8+j] += stime;
-        dprintf("Updated frame %lu/%lu bandwidth for stime: %u\n", i, j, uframe_bandwidth[i*8+j]);
-        // assumes s_mask and c_mask will never be active for the same uframe
+        dprintf("Updated frame %lu/%lu bandwidth for stime %u: %u\n", i, j, stime, uframe_bandwidth[i*8+j]);
       }
       if (mask & c_mask) {
         uframe_bandwidth[i*8+j] += ctime;
-        dprintf("Updated frame %lu/%lu bandwidth for ctime: %u\n", i, j, uframe_bandwidth[i*8+j]);
+        dprintf("Updated frame %lu/%lu bandwidth for ctime %u: %u\n", i, j, ctime, uframe_bandwidth[i*8+j]);
       }
-    }
-
-    /* make sure we didn't find ourselves, e.g. if we already inserted
-     * ourselves after an existing node we will already be scheduled for
-     * all the same intervals as that node...
-     */
-    if (h != ep_link) {
-      // insert into the scheduling tree
-      if (*ep_link == 1) {
-        // update the endpoint's horizontal link only once - all following nodes repeat with the same interval
-        *ep_link = *h;
-        dprintf("Linking %p to %08X, next %08lX\n", h, link_to, *h);
-        cache_flush_invalidate(ep_link);
-      } else {
-        dprintf("Linking %p to %08X\n", h, link_to);
-      }
-      cache_invalidate(h);
-      *h = link_to;
-      cache_flush_invalidate(h);
-    } else {
-      dprintf("%p found already in schedule at frame %lu\n", ep_link, i);
     }
   }
+
   // put in host's active list of endpoints
   ep->host_next = endpoints;
   endpoints = ep;
@@ -1992,21 +2269,17 @@ void USB_Host::port_enable(uint8_t port, bool set) {
 }
 
 USB_Host::USB_Host(usb_ehci_base_t* const base) :
-  USB_Hub(0),
-  EHCI((usb_ehci_cmd_t*)((uint8_t*)base + base->CAPLENGTH)),
-  nPorts(base->HCSPARAMS.N_PORTS)
+USB_Hub(0),
+PeriodicScheduler(((usb_ehci_cmd_t*)((uint8_t*)base + base->CAPLENGTH))->FRINDEX),
+EHCI((usb_ehci_cmd_t*)((uint8_t*)base + base->CAPLENGTH)),
+nPorts(base->HCSPARAMS.N_PORTS)
 {
-  periodictable = (uint32_t*)aligned_alloc(4096, sizeof(uint32_t)*PERIODIC_LIST_SIZE);
   memset(addresses, 0, sizeof(addresses));
   // reserve address 0
   addresses[0] = 1;
   endpoints = &Enum;
   async_cleanup = NULL;
   periodic_cleanup = NULL;
-}
-
-USB_Host::~USB_Host() {
-  free(periodictable);
 }
 
 void USB_Host::usb_process(void) {
@@ -2017,19 +2290,14 @@ void USB_Host::usb_process(void) {
   }
   dprintf(" done\n");
 
-  dprintf("PERIODIC_LIST_SIZE: %d (%p)\n", PERIODIC_LIST_SIZE, periodictable);
-  for (int i=0; i < PERIODIC_LIST_SIZE; i++)
-    periodictable[i] = 0x80000001;
-  cache_flush(periodictable, sizeof(periodictable[0])*PERIODIC_LIST_SIZE);
   memset(uframe_bandwidth, 0, sizeof(uframe_bandwidth));
-
   EHCI->USBINTR = 0;
   setHostMode();
   EHCI->PERIODICLISTBASE = periodictable;
   EHCI->FRINDEX = 0;
-  dprintf("Enumeration endpoint: %p\n", &Enum.hlink);
+  dprintf("Enumeration QH: %p\n", static_cast<usb_queue_head_t*>(&Enum));
   Enum.clean_after_write();
-  EHCI->ASYNCLISTADDR = Enum.link_to & ~0x1F;
+  EHCI->ASYNCLISTADDR = (uint32_t)static_cast<usb_queue_head_t*>(&Enum);
   uint32_t usbcmdinit = 0;
 #if (PERIODIC_LIST_SIZE >= 8 && PERIODIC_LIST_SIZE < 128)
     usbcmdinit |= USB_USBCMD_FS_2 | USB_USBCMD_FS_1((64 - PERIODIC_LIST_SIZE) / 17);
@@ -2136,8 +2404,10 @@ void USB_Host::usb_process(void) {
             EHCI->USBINTR &= ~USB_USBINTR_FRE;
             unschedule_periodic();
             // re-enable the interrupt if there's more to cleanup
-            if (periodic_cleanup != NULL)
+            if (periodic_cleanup != NULL) {
               EHCI->USBINTR |= USB_USBINTR_FRE;
+              mem_sync();
+            }
           }
         } while(0);
         nextIRQ();
@@ -2162,7 +2432,7 @@ void USB_Host::usb_process(void) {
             break;
           case USB_ENDPOINT_BULK:
           case USB_ENDPOINT_CONTROL:
-            add_async_queue(msg.endpoint.ep);
+            add_async_queue(static_cast<USB_Async_Endpoint*>(msg.endpoint.ep));
             break;
           default:
             dprintf("Don't know how to activate endpoint %p, type is %d\n", msg.endpoint.ep, msg.endpoint.ep->ep_type);
@@ -2173,12 +2443,13 @@ void USB_Host::usb_process(void) {
       case USB_MSG_ENDPOINT_DEACTIVATE:
         switch (msg.endpoint.ep->ep_type) {
           case USB_ENDPOINT_INTERRUPT:
+          case USB_ENDPOINT_ISOCHRONOUS:
             if (remove_periodic_queue(static_cast<USB_Periodic_Endpoint*>(msg.endpoint.ep)) == true)
               continue;
             break;
           case USB_ENDPOINT_CONTROL:
           case USB_ENDPOINT_BULK:
-            if (remove_async_queue(msg.endpoint.ep) == true)
+            if (remove_async_queue(static_cast<USB_Async_Endpoint*>(msg.endpoint.ep)) == true)
               continue;
             break;
           default:
