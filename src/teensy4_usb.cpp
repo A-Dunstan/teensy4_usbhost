@@ -204,8 +204,8 @@ int USB_Driver::InterruptMessage(uint8_t bEndpoint, uint16_t wLength, void *data
   });
 }
 
-int USB_Driver::IsochronousMessage(uint8_t bEndpoint, isolength* Lengths, void *data) {
-  return sync_message([=](const USBCallback &cb)->int {
+int USB_Driver::IsochronousMessage(uint8_t bEndpoint, isolength& Lengths, void *data) {
+  return sync_message([=,&Lengths](const USBCallback &cb)->int {
     return IsochronousMessage(bEndpoint, Lengths, data, &cb);
   });
 }

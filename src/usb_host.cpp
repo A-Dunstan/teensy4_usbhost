@@ -508,7 +508,162 @@ bool USB_Interrupt_Endpoint::set_inactive(void) {
   return was_removed;
 }
 
-USB_ISO_Endpoint::USB_ISO_Endpoint(uint8_t endpoint, uint16_t max_packet_size, uint8_t address, uint8_t hub_addr, uint8_t port, uint32_t i) :
+template <class CTransfer>
+class iso_transfer : public CCallback<CTransfer> {
+private:
+  const USBCallback *cb;
+  int16_t* const lengths;
+  unsigned int xfer_done;
+  int total_length;
+
+  void callback(const CTransfer *t,int r) override {
+//    dprintf("T%u %p %d\n", done, t, r);
+    lengths[xfer_done] = (int16_t)r;
+    if (r > 0) total_length += r;
+
+    if (++xfer_done >= xfer_total) {
+      (*cb)(r < 0 ? r : total_length);
+      delete(this);
+    }
+  }
+public:
+  unsigned int xfer_total;
+
+  iso_transfer(const USBCallback *_cb, int16_t *l) :
+  cb(_cb),
+  lengths(l) {
+    xfer_done = 0;
+    xfer_total = 0;
+    total_length = 0;
+  }
+
+  static void* operator new(size_t s, unsigned int t_count, CTransfer* &transfers) noexcept(true) {
+    s = (s + 31) & ~31;
+    uint8_t *p = (uint8_t*)aligned_alloc(32, s + t_count*sizeof(CTransfer));
+    if (p != NULL)
+      transfers = new (p+s) CTransfer[t_count];
+    return p;
+  }
+};
+
+class USB_ISO_High_Endpoint : public USB_Periodic_Endpoint {
+private:
+  const bool dir_in;
+  const uint32_t mult;
+  const uint32_t wMaxPacketSize;
+  const uint8_t address;
+  const uint8_t endpoint;
+  uint8_t s_mask;
+
+  itd_transfer* pending = NULL;
+
+  int Schedule(itd_transfer*);
+
+public:
+  void update(void);
+  void flush(void) override {};
+
+  void new_offset(void) override;
+  bool set_inactive(void) override;
+
+  USB_ISO_High_Endpoint(uint8_t endopint, uint16_t wMaxPacketSize, uint8_t address, uint32_t interval);
+  ~USB_ISO_High_Endpoint();
+
+  void get_masks(uint8_t& smask, uint8_t& cmask) const override {smask = s_mask, cmask = 0;}
+
+  int IsochronousTransfer(isolength& Lengths, void *buffer, const USBCallback* cb) override;
+};
+
+USB_ISO_High_Endpoint::USB_ISO_High_Endpoint(uint8_t _endpoint, uint16_t _wMaxPacketSize, uint8_t _address, uint32_t i) :
+USB_Periodic_Endpoint(USB_ENDPOINT_ISOCHRONOUS),
+dir_in(_endpoint & 0x80),
+mult(((_wMaxPacketSize + 2048) >> 11) & 3),
+wMaxPacketSize(((_wMaxPacketSize & 0x7FF) < 1024) ? (_wMaxPacketSize & 0x7FF) : 1024),
+address(_address),
+endpoint(_endpoint & 0x7F)
+{
+  dprintf("New USB_ISO_High_Endpoint: %p\n", this);
+  if (i > 16) i = 16;
+  i = 1 << (i - 1);
+
+  if (i > PERIODIC_LIST_SIZE*8)
+    i = PERIODIC_LIST_SIZE*8;
+  interval = i;
+
+  uint32_t maxlen = (((wMaxPacketSize+2) * 298) >> 8) + 5+12;
+  stime = mult * ((19 + maxlen + 31) >> 5);
+
+  switch (interval) {
+    case 1:
+      s_mask = 0xFF;
+      break;
+    case 2:
+      s_mask = 0x55;
+      break;
+    case 4:
+      s_mask = 0x11;
+      break;
+    default:
+      s_mask = 1;
+  }
+}
+
+USB_ISO_High_Endpoint::~USB_ISO_High_Endpoint() {
+  dprintf("USB_ISO_High_Endpoint<%p> deleted\n", this);
+}
+
+void USB_ISO_High_Endpoint::new_offset(void) {
+  s_mask <<= (offset & 7);
+}
+
+bool USB_ISO_High_Endpoint::set_inactive(void) {
+  bool removed = false;
+  while (pending) {
+    itd_transfer *t = pending;
+    pending = t->next;
+    removed |= remove_node(t->frame>>3, t->link_to(), t->horizontal_link);
+
+    t->cb->callback(t, -ENODEV);
+  }
+
+  return removed;
+}
+
+void USB_ISO_High_Endpoint::update(void) {
+  while (pending) {
+    itd_transfer *t = pending;
+
+    cache_invalidate(t, sizeof(usb_iTD_t));
+    for (unsigned int i=8; i > 0; i--) {
+      // process complete iTD only
+      if (t->transfers[i-1].status & 0x8)
+        return;
+    }
+    pending = t->next;
+    remove_node(t->frame>>3, t->link_to(), t->horizontal_link);
+
+    uint16_t transferred = 0;
+    for (unsigned int i=0; i < 8; i++) {
+      if (t->s_mask & (1<<i)) {
+        if (t->transfers[i].status & 7)
+          dprintf("Possible ISO transfer error: %02X\n", t->transfers[i].status);
+        /* iTD is handled differently to siTD:
+         * siTD total is updated to the number of bytes that _weren't_ transferred
+         * iTD total is updated to the number of bytes that _were_ transferred
+         */
+        transferred += t->transfers[i].total;
+      }
+    }
+
+    if (dir_in) {
+      cache_invalidate(t->buffer, transferred);
+    }
+
+    t->cb->callback(t,transferred);
+  }
+}
+
+USB_ISO_Full_Endpoint::USB_ISO_Full_Endpoint(uint8_t endpoint, uint16_t max_packet_size, uint8_t address, uint8_t hub_addr, uint8_t port, uint32_t i) :
 USB_Periodic_Endpoint(USB_ENDPOINT_ISOCHRONOUS),
 dir_in(endpoint & 0x80) {
   wMaxPacketSize = max_packet_size & 0x7FF;
@@ -551,60 +706,31 @@ dir_in(endpoint & 0x80) {
   state.dir = dir_in ? 1:0;
 }
 
-USB_ISO_Endpoint::~USB_ISO_Endpoint() {
+bool USB_ISO_Full_Endpoint::set_inactive(void) {
+  bool removed = false;
   while (pending) {
     sitd_transfer *t = pending;
     pending = t->next;
-    remove_node(t->frame>>3, t->link_to(), t->horizontal_link);
+    removed |= remove_node(t->frame>>3, t->link_to(), t->horizontal_link);
 
     t->cb->callback(t, -ENODEV);
   }
-  dprintf("USB_ISO_Endpoint<%p> deleted\n");
+
+  return removed;
 }
 
-void USB_ISO_Endpoint::new_offset(void) {
-  dprintf("ISO_Endpoint<%p>: new_offset %d\n", this, offset);
+
+USB_ISO_Full_Endpoint::~USB_ISO_Full_Endpoint() {
+  dprintf("USB_ISO_Full_Endpoint<%p> deleted\n", this);
+}
+
+void USB_ISO_Full_Endpoint::new_offset(void) {
+  dprintf("USB_ISO_Full_Endpoint<%p>: new_offset %d\n", this, offset);
   s_mask <<= (offset & 7);
   c_mask <<= (offset & 7);
 }
 
-class sitd_group : public CCallback<sitd_transfer> {
-private:
-  const USBCallback *cb;
-  int done;
-
-  void callback(const sitd_transfer*,int r) override {
-    if (++done >= total) {
-      (*cb)(r);
-      delete(this);
-    }
-  }
-public:
-  int total;
-
-  sitd_group(const USBCallback *_cb) :
-  cb(_cb) {
-    done = 0;
-  }
-
-  sitd_transfer* get_transfers(void) {
-    size_t p = (size_t)(this+1);
-    p = (p+31) & ~31;
-    return (sitd_transfer*)p;
-  }
-
-  static void* operator new(size_t s, isolength* l) noexcept(true) {
-    size_t t_count;
-    for (t_count=0; t_count < 8; t_count++) {
-      if ((*l)[t_count]==0)
-        break;
-    }
-    s = (s + 31) & ~31;
-    return aligned_alloc(32, s + t_count*sizeof(sitd_transfer));
-  }
-};
-
-void USB_ISO_Endpoint::update(void) {
+void USB_ISO_Full_Endpoint::update(void) {
   while (pending) {
     sitd_transfer *t = pending;
 
@@ -617,58 +743,189 @@ void USB_ISO_Endpoint::update(void) {
     pending = t->next;
     remove_node(t->frame>>3, t->link_to(), t->horizontal_link);
 
-    uint16_t length = *t->length - t->total;
+    int16_t length = t->length - t->total;
 
     if (dir_in) {
       cache_invalidate(t->buffer, length);
     }
 
-    *t->length = length;
     t->cb->callback(t,length);
   }
 }
 
-int USB_ISO_Endpoint::IsochronousTransfer(isolength* pLength, void *buffer, const USBCallback* cb) {
-  sitd_group *sg = new(pLength) sitd_group(cb);
-  if (sg == NULL) errno = ENOMEM;
+int USB_ISO_High_Endpoint::IsochronousTransfer(isolength& Lengths, void* buffer, const USBCallback* cb) {
+  iso_transfer<itd_transfer> *ig;
+  itd_transfer* t;
+  unsigned int t_count;
+  uint8_t* dst = (uint8_t*)buffer;
+  uint16_t length_per_t = mult * wMaxPacketSize;
+
+  for (t_count = 0; t_count < 8; t_count++) {
+    if (Lengths[t_count]==0) break;
+  }
+
+  ig = new(t_count, t) iso_transfer<itd_transfer>(cb, Lengths);
+  if (ig == NULL) errno = ENOMEM;
   else {
-    sitd_transfer* t = sg->get_transfers();
-    uint8_t* dst = (uint8_t*)buffer;
-    int16_t *Lengths = *pLength;
-    int i;
-    for (i=0; i < 8; i++) {
-      if (Lengths[i] == 0) break;
-      if (Transfer(t, &Lengths[i], dst, sg) < 0) {
-        dprintf("Failed to schedule transfer %u\n", i);
+    int16_t *pLength = Lengths;
+    do {
+      memset(t, 0, sizeof(*t));
+      t->horizontal_link = 1;
+      t->address = address;
+      t->endpt = endpoint;
+      t->wMaxPacketSize = wMaxPacketSize;
+      t->dir = dir_in;
+      t->Mult = mult;
+
+      uint32_t len = *pLength;
+      uint32_t PG = 0;
+      uint32_t b = (uint32_t)dst;
+      t->page0 = b >> 12;
+      t->page1 = (b+0x1000) >> 12;
+      t->page2 = (b+0x2000) >> 12;
+      t->page3 = (b+0x3000) >> 12;
+      t->page4 = (b+0x4000) >> 12;
+      t->page5 = (b+0x5000) >> 12;
+      t->page6 = (b+0x6000) >> 12;
+
+      cache_flush_invalidate(dst, len);
+
+      for (int i=0; i < 8 && len; i++) {
+        if (s_mask & (1<<i)) {
+          uint32_t this_len = len > length_per_t ? length_per_t : len;
+          t->transfers[i].status = 8; // active
+          t->transfers[i].total = this_len;
+          t->transfers[i].IOC = 1;
+          t->transfers[i].PG = PG;
+          t->transfers[i].offset = b & 0xFFF;
+          uint32_t nextb = b + this_len;
+          if ((nextb ^ b) & 0x1000) ++PG;
+          b = nextb;
+          t->s_mask |= 1<<i;
+          len -= this_len;
+        }
+      }
+
+      t->cb = ig;
+      t->buffer = dst;
+      dst += *pLength;
+      *pLength++ = 0;
+      cache_flush(t, sizeof(usb_iTD_t));
+
+      if (Schedule(t) < 0) {
+        dprintf("Failed to schedule transfer\n");
         break;
       }
-      dst += Lengths[i];
+      ig->xfer_total++;
       t++;
-    }
-    if (i > 0) {
-      sg->total = i;
+    } while (--t_count);
+
+    if (ig->xfer_total > 0)
       return 0;
-    }
+
+    delete ig;
+  }
+  return -1;
+}
+
+int USB_ISO_Full_Endpoint::IsochronousTransfer(isolength& Lengths, void *buffer, const USBCallback* cb) {
+  iso_transfer<sitd_transfer> *sg;
+  sitd_transfer* t;
+  unsigned int t_count;
+  uint8_t* dst = (uint8_t*)buffer;
+
+  for (t_count = 0; t_count < 8; t_count++) {
+    if (Lengths[t_count]==0) break;
+  }
+
+  sg = new(t_count, t) iso_transfer<sitd_transfer>(cb, Lengths);
+  if (sg == NULL) errno = ENOMEM;
+  else {
+    int16_t *pLength = Lengths;
+    do {
+      int16_t length = *pLength;
+      *pLength++ = 0;
+      if (Transfer(t, length, dst, sg) < 0) {
+        dprintf("Failed to schedule transfer\n");
+        break;
+      }
+      sg->xfer_total++;
+      dst += length;
+      t++;
+    } while (--t_count);
+
+    if (sg->xfer_total > 0)
+      return 0;
 
     delete sg;
   }
   return -1;
 }
 
-int USB_ISO_Endpoint::Transfer(sitd_transfer *t, int16_t *Length, void *buffer, CCallback<sitd_transfer>* cb) {
+int USB_ISO_High_Endpoint::Schedule(itd_transfer *t) {
+  uint32_t uframe_now = current_uframe();
+  uint32_t uframe_max = (uframe_now + PERIODIC_LIST_SIZE*8 - interval) & ~7;
+  uint32_t uframe_min = (uframe_now + 9) & ~7;
+  uint32_t uframe_cur = uframe_min;
+  if (pending) {
+    itd_transfer *p = pending;
+    while (p->next) p = p->next;
+    uint32_t f = p->frame;
+    if (f < uframe_now) {
+      f += PERIODIC_LIST_SIZE*8;
+    }
+    if (f < uframe_max) {
+      f += interval > 8 ? interval : 8;
+      if (f > uframe_cur) uframe_cur = f;
+    }
+  }
+  t->frame = (uframe_cur & (~interval + 1)) + offset;
+  if (t->frame < uframe_cur)
+    t->frame += interval;
+
+//  dprintf("ISO transfer<%p>: uframe_now %lu:%lu, scheduled %lu:%lu, uframe_min %lu:%lu, uframe_max %lu:%lu\n", t, uframe_now>>3, uframe_now&7, t->frame>>3, t->frame&7, uframe_min>>3, uframe_min&7, uframe_max>>3, uframe_max&7);
+
+  // did we find a suitable time-slot?
+  if (uframe_min <= t->frame && t->frame < uframe_max) {
+    t->frame = t->frame % (PERIODIC_LIST_SIZE*8);
+
+    if (add_node(t->frame>>3, t->link_to(), 0xFFFFFFFF)) {
+      itd_transfer** p = &pending;
+      while (*p) p = &(*p)->next;
+      *p = t;
+      return 0;
+    }
+    errno = ENOBUFS;
+  }
+  else errno = EBUSY;
+  dprintf("Failed to add node: uframe_now %lu:%lu, scheduled %lu:%lu, uframe_min %lu:%lu, uframe_max %lu:%lu, uframe_cur %lu:%lu\n", uframe_now>>3, uframe_now&7, t->frame>>3, t->frame&7, uframe_min>>3, uframe_min&7, uframe_max>>3, uframe_max&7, uframe_cur>>3, uframe_cur&7);
+  if (pending) {
+    dprintf("PENDING:");
+    itd_transfer *p = pending;
+    while (p) {
+      dprintf(" %lu:%lu", p->frame>>3, p->frame&7);
+      p = p->next;
+    }
+    dprintf("\n");
+  }
+  return -1;
+}
+
+int USB_ISO_Full_Endpoint::Transfer(sitd_transfer *t, int16_t Length, void *buffer, CCallback<sitd_transfer>* cb) {
   memset(t, 0, sizeof(usb_siTD_t));
   t->horizontal_link = 1;
   t->state = state;
   t->s_mask = s_mask;
   t->c_mask = c_mask;
   t->status = 0x80;
-  t->total = *Length;
+  t->total = Length;
   t->IOC = 1;
 
   t->buffer = t->page0 = buffer;
   t->page1 = (((uint32_t)buffer)>>12)+1;
 
-  t->t_count = __builtin_popcount(s_mask);
+  t->t_count = dir_in ? 1 : ((t->total+187) / 188); //__builtin_popcount(s_mask);
+  t->TP = (t->t_count==1) ? 0 : 1; // ALL or BEGIN
   t->back_pointer = 1;
 
   t->cb = cb;
@@ -676,11 +933,11 @@ int USB_ISO_Endpoint::Transfer(sitd_transfer *t, int16_t *Length, void *buffer, 
   t->next = NULL;
 
   // this may take a while so do it before fetching the current uframe index
-  cache_flush_invalidate(buffer, *Length);
+  cache_flush_invalidate(buffer, Length);
 
   uint32_t uframe_now = current_uframe();
   // this is the cut-off point for scheduling: a full list period from now
-  uint32_t uframe_max = (uframe_now & ~7) + PERIODIC_LIST_SIZE*8 - 8;
+  uint32_t uframe_max = (uframe_now + PERIODIC_LIST_SIZE*8 - interval) & ~7;
   // this is the earliest allowed: at least 1 full frame ahead
   uint32_t uframe_min = (uframe_now + 9) & ~7;
   uint32_t uframe_cur = uframe_min;
@@ -907,6 +1164,8 @@ void USB_Device::callback(const usb_control_transfer *t, int result) {
               }
               return;
             }
+            else
+              dprintf("Device<%p> had a bad configuration descriptor\n", this);
             break;
           case USB_DT_STRING:
             // this device has a bad bDescriptorType in some of its strings
@@ -1058,7 +1317,7 @@ void USB_Device::USBMessage(const usb_msg_t& msg) {
       deref();
       break;
     case USB_MSG_DEVICE_ISOCHRONOUS_TRANSFER:
-      IsochronousTransfer(msg.device.iso.bEndpoint, msg.device.iso.lengths, msg.device.iso.data, msg.device.cb);
+      IsochronousTransfer(msg.device.iso.bEndpoint, *msg.device.iso.lengths, msg.device.iso.data, msg.device.cb);
       deref();
       break;
     default:
@@ -1155,7 +1414,16 @@ void USB_Device::activate_endpoint(const usb_endpoint_descriptor* p) {
         return;
       }
       refcount.fetch_add(1);
-      Endpoints[i].ep = new(std::nothrow) USB_ISO_Endpoint(p->bEndpointAddress, p->wMaxPacketSize, address, hub_addr, port, p->bInterval);
+      switch (speed) {
+        case 0: // full speed
+          Endpoints[i].ep = new(std::nothrow) USB_ISO_Full_Endpoint(p->bEndpointAddress, p->wMaxPacketSize, address, hub_addr, port, p->bInterval);
+          break;
+        case 2: // high speed
+           Endpoints[i].ep = new(std::nothrow) USB_ISO_High_Endpoint(p->bEndpointAddress, p->wMaxPacketSize, address, p->bInterval);
+          break;
+        default: // ???
+          dprintf("Unsupported speed for Isochronous endpoint: %d\n", speed);
+      }
       if (Endpoints[i].ep != NULL) {
         Endpoints[i].type = USB_ENDPOINT_ISOCHRONOUS;
         if (host->activate_endpoint(Endpoints[i].ep, this))
@@ -1260,6 +1528,12 @@ uint8_t USB_Device::validate_descriptor(const uint8_t* &desc, const uint8_t* con
 //    dprintf("validate descriptor %p length %d less than desc_len %u\n", desc, length, desc[0]);
     return 0;
   }
+  if (desc[0] == 0) {
+//    dprintf("validate_descriptor %p: descriptor length is 0\n", desc);
+    return 0;
+  }
+
+//  dprintf("validate_descriptor: %p %02X %02X\n", desc, desc[0], desc[1]);
 
   switch (desc[1]) {
     case USB_DT_DEVICE:
@@ -1353,7 +1627,6 @@ uint8_t USB_Device::validate_descriptor(const uint8_t* &desc, const uint8_t* con
       }
       break;
     default:
-//      dprintf("%p Unknown descriptor type %02X length %u\n", desc, desc[1], desc[0]);
       uint8_t dt = desc[1];
       desc += desc[0];
       return dt;
@@ -1445,7 +1718,7 @@ void USB_Device::InterruptTransfer(uint8_t bEndpoint, uint32_t dLength, void *da
   (*cb)(-errno);
 }
 
-void USB_Device::IsochronousTransfer(uint8_t bEndpoint, isolength* Lengths, void *data, const USBCallback* cb) {
+void USB_Device::IsochronousTransfer(uint8_t bEndpoint, isolength& Lengths, void *data, const USBCallback* cb) {
   if (Endpoints[bEndpoint].type == USB_ENDPOINT_ISOCHRONOUS) {
     if (Endpoints[bEndpoint].ep->IsochronousTransfer(Lengths, data, cb) == 0)
       return;
@@ -1538,7 +1811,7 @@ int USB_Driver::ControlMessage(uint8_t bmRequestType, uint8_t bmRequest, uint16_
 }
 
 int USB_Driver::ControlMessage(uint8_t bmRequestType, uint8_t bmRequest, uint16_t wValue, uint16_t wIndex, uint16_t wLength, void *data, const USBCallback &cb_func) {
-  // control callback is always copied so don't need to clone it
+  // control callback is always copied (see pushMessage) so don't need to clone it
   return ControlMessage(bmRequestType,bmRequest,wValue,wIndex,wLength,data,&cb_func);
 }
 
@@ -1584,20 +1857,20 @@ int USB_Driver::InterruptMessage(uint8_t bEndpoint, uint16_t wLength, void *data
   return -1;
 }
 
-int USB_Driver::IsochronousMessage(uint8_t bEndpoint, isolength* Lengths, void *data, const USBCallback* cb_func) {
+int USB_Driver::IsochronousMessage(uint8_t bEndpoint, isolength& Lengths, void *data, const USBCallback* cb_func) {
   usb_msg_t msg = {
     .type = USB_MSG_DEVICE_ISOCHRONOUS_TRANSFER,
     .device = {
       .cb = cb_func,
       .iso = {
         .bEndpoint = bEndpoint,
-        .lengths = Lengths,
+        .lengths = &Lengths,
         .data = data
       }
     }
   };
   if (device == NULL) errno = ENOENT;
-  else if ((*Lengths)[0] == 0) errno = EINVAL;
+  else if (Lengths[0] == 0) errno = EINVAL;
   else {
     if (device->pushMessage(msg))
       return 0;
@@ -1642,7 +1915,7 @@ int USB_Driver::InterruptMessage(uint8_t bEndpoint, uint16_t wLength, void *data
   return -1;
 }
 
-int USB_Driver::IsochronousMessage(uint8_t bEndpoint, isolength* Lengths, void *data, USBCallback cb_func) {
+int USB_Driver::IsochronousMessage(uint8_t bEndpoint, isolength& Lengths, void *data, USBCallback cb_func) {
   FuncWrapper* cb = new (std::nothrow) FuncWrapper(cb_func);
   if (cb == NULL) {
     errno = ENOMEM;
@@ -1670,7 +1943,7 @@ __attribute__((weak)) int USB_Driver::InterruptMessage(uint8_t,uint16_t,void*) {
   return -1;
 }
 
-__attribute__((weak)) int USB_Driver::IsochronousMessage(uint8_t,isolength*,void*) {
+__attribute__((weak)) int USB_Driver::IsochronousMessage(uint8_t,isolength&,void*) {
   errno = ENOSYS;
   return -1;
 }
@@ -2143,13 +2416,13 @@ bool USB_Host::calculate_offset(const USB_Periodic_Endpoint *ep, uint32_t &offse
       continue;
     }
     uint32_t max_bandwidth = 0;
-    for (uint32_t i=off; i < PERIODIC_LIST_SIZE*8; i += interval) {
+    for (uint32_t i=off; i < PERIODIC_LIST_SIZE*8; i += (interval > 8 ? interval:8)) {
       uint32_t umax = max_bandwidth;
       for (uint8_t j=0; j < 8; j++) {
         if ((s_mask | c_mask) & (1<<j)) {
           if ((i+j) >= PERIODIC_LIST_SIZE*8) {
             // frame rollover not allowed
-//            dprintf("offset %u not allowed due to frame rollover\n", off);
+//            dprintf("offset %u not allowed due to frame rollover\n", i+j);
             umax = 0xFFFFFFFF;
             break;
           }
@@ -2171,7 +2444,10 @@ bool USB_Host::calculate_offset(const USB_Periodic_Endpoint *ep, uint32_t &offse
     }
   }
   // fail if the best found needs more than 80% (234 * 0.8) in any uframe
-  if (best_bandwidth > 187) return false;
+  if (best_bandwidth > 187) {
+    dprintf("calculate_bandwidth for endpoint %p failed: best_bandwidth %u, offset %u, interval %u\n", ep, best_bandwidth, offset, ep->interval);
+    return false;
+  }
   return true;
 }
 

@@ -121,6 +121,16 @@ typedef struct __attribute__((aligned(64))) usb_iTD_t {
   uint32_t page6:20;
 } usb_iTD_t;
 
+typedef struct itd_transfer : usb_iTD_t {
+  struct itd_transfer *next;
+  CCallback<itd_transfer> *cb;
+  uint32_t frame;
+  void* buffer;
+  uint8_t s_mask;
+  uint32_t link_to() const { return (uint32_t)&horizontal_link; }
+} itd_transfer;
+
+
 // SPLIT-TRANSACTION ISOCHRONOUS TRANSACTION DESCRIPTOR: FIXED LAYOUT (32-BYTE ALIGNED)
 typedef struct __attribute__((aligned(32))) usb_siTD_t {
   uint32_t horizontal_link;
@@ -165,7 +175,7 @@ typedef struct sitd_transfer : usb_siTD_t {
   CCallback<sitd_transfer> *cb;
   uint32_t frame;
   void* buffer;
-  int16_t *length;
+  int16_t length;
   uint32_t link_to() const { return ((uint32_t)&horizontal_link)|4; }
 } sitd_transfer;
 
@@ -295,7 +305,7 @@ public:
   virtual int InterruptTransfer(uint32_t Length, void *buffer, const USBCallback* cb) {
     return -EOPNOTSUPP;
   }
-  virtual int IsochronousTransfer(isolength* Lengths, void *buffer, const USBCallback* cb) {
+  virtual int IsochronousTransfer(isolength& Lengths, void *buffer, const USBCallback* cb) {
     return -EOPNOTSUPP;
   }
 
@@ -321,9 +331,9 @@ private:
 protected:
   using USB_Endpoint::USB_Endpoint;
   virtual void new_offset(void) = 0;
-  bool add_node(uint32_t frame, uint32_t link_to, uint32_t interval) { return scheduler ? scheduler->add_node(frame, link_to, interval) : false; }
-  bool remove_node(uint32_t frame, uint32_t link_to, uint32_t next) { return scheduler ? scheduler->remove_node(frame, link_to, next) : false; }
-  uint32_t current_uframe(void) { return scheduler ? scheduler->current_uframe() : 0; }
+  bool add_node(uint32_t frame, uint32_t link_to, uint32_t interval) const { return scheduler ? scheduler->add_node(frame, link_to, interval) : false; }
+  bool remove_node(uint32_t frame, uint32_t link_to, uint32_t next) const { return scheduler ? scheduler->remove_node(frame, link_to, next) : false; }
+  uint32_t current_uframe(void) const { return scheduler ? scheduler->current_uframe() : 0; }
 
 public:
   uint32_t interval = 0; // calculated interval in uframes, mapped to PERIODIC_LIST_SIZE*8
@@ -435,7 +445,7 @@ public:
   }
 };
 
-class USB_ISO_Endpoint : public USB_Periodic_Endpoint {
+class USB_ISO_Full_Endpoint : public USB_Periodic_Endpoint {
 private:
   const bool dir_in;
   uint16_t wMaxPacketSize;
@@ -444,21 +454,21 @@ private:
 
   sitd_transfer* pending = NULL;
 
-  int Transfer(sitd_transfer*, int16_t *length, void *buffer, CCallback<sitd_transfer>*);
+  int Transfer(sitd_transfer*, int16_t length, void *buffer, CCallback<sitd_transfer>*);
 
 public:
   void update(void) override;
-  void flush(void) override {}
+  void flush(void) override {};
 
   void new_offset(void) override;
-  bool set_inactive(void) override { return false; }
+  bool set_inactive(void) override;
 
-  USB_ISO_Endpoint(uint8_t endpoint, uint16_t max_packet_size, uint8_t address, uint8_t hub_addr, uint8_t port, uint32_t interval);
-  ~USB_ISO_Endpoint();
+  USB_ISO_Full_Endpoint(uint8_t endpoint, uint16_t max_packet_size, uint8_t address, uint8_t hub_addr, uint8_t port, uint32_t interval);
+  ~USB_ISO_Full_Endpoint();
 
   void get_masks(uint8_t& smask, uint8_t& cmask) const override {smask = s_mask, cmask = c_mask;}
 
-  int IsochronousTransfer(isolength* Lengths, void *buffer, const USBCallback* cb) override;
+  int IsochronousTransfer(isolength& Lengths, void *buffer, const USBCallback* cb) override;
 };
 
 class USB_Hub {
@@ -654,7 +664,7 @@ private:
   bool prepare_control_transfer(usb_msg_t& msg);
   void BulkTransfer(uint8_t bEndpoint, uint32_t dLength, void* data, const USBCallback* cb);
   void InterruptTransfer(uint8_t bEndpoint, uint32_t dLength, void* data, const USBCallback* cb);
-  void IsochronousTransfer(uint8_t bEndpoint, isolength* Lengths, void* data, const USBCallback* cb);
+  void IsochronousTransfer(uint8_t bEndpoint, isolength& Lengths, void* data, const USBCallback* cb);
   void ControlTransfer(uint8_t bmRequestType, uint8_t bmRequest, uint16_t wValue, uint16_t wIndex, uint16_t wLength, void *data, CCallback<usb_control_transfer>*);
 
 public:
@@ -700,17 +710,17 @@ protected:
   int ControlMessage(uint8_t bmRequestType, uint8_t bmRequest, uint16_t wValue, uint16_t wIndex, uint16_t wLength, void *data, const USBCallback&);
   int BulkMessage(uint8_t bEndpoint, uint32_t dLength, void *data, USBCallback);
   int InterruptMessage(uint8_t bEndpoint, uint16_t wLength, void *data, USBCallback);
-  int IsochronousMessage(uint8_t bEndpoint, isolength*, void *data, USBCallback);
+  int IsochronousMessage(uint8_t bEndpoint, isolength&, void *data, USBCallback);
   // asynchronous, callback pointer
   int ControlMessage(uint8_t bmRequestType, uint8_t bmRequest, uint16_t wValue, uint16_t wIndex, uint16_t wLength, void *data, const USBCallback*);
   int BulkMessage(uint8_t bEndpoint, uint32_t dLength, void *data, const USBCallback*);
   int InterruptMessage(uint8_t bEndpoint, uint16_t wLength, void *data, const USBCallback*);
-  int IsochronousMessage(uint8_t bEndpoint, isolength*, void *data, const USBCallback*);
+  int IsochronousMessage(uint8_t bEndpoint, isolength&, void *data, const USBCallback*);
   // synchronous
   int ControlMessage(uint8_t bmRequestType, uint8_t bmRequest, uint16_t wValue, uint16_t wIndex, uint16_t wLength, void *data);
   int BulkMessage(uint8_t bEndpoint, uint32_t dLength, void *data);
   int InterruptMessage(uint8_t bEndpoint, uint16_t wLength, void *data);
-  int IsochronousMessage(uint8_t bEndpoint, isolength*, void *data);
+  int IsochronousMessage(uint8_t bEndpoint, isolength&, void *data);
 };
 
 // base class for a driver that can be instantiated multiple times as needed
