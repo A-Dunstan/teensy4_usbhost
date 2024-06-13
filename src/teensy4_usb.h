@@ -1,6 +1,14 @@
-#include <atomic>
+#ifndef _TEENSY4_USB_H
+#define _TEENSY4_USB_H
+
+#if defined __has_include && __has_include(<teensyatom.h>)
 #include <teensyatom.h>
-#include "usb_host.h"
+#else
+#error "Could not find teensyatom library"
+#endif
+
+#include <usb_host.h>
+#include <atomic>
 
 #define USB_STACK_SIZE 1024
 
@@ -51,7 +59,7 @@ private:
   uint32_t usb_stack[USB_STACK_SIZE];
   virtual void thread(void) = 0;
   static void thread_start(uint32_t _p) {
-	  ((class USBHostBase*)_p)->thread();
+    ((class USBHostBase*)_p)->thread();
   }
 
 protected:
@@ -61,7 +69,7 @@ protected:
 
 public:
   void begin(void) {
-	  atomThreadCreate(&usb_thread, 64, thread_start, (uint32_t)this, usb_stack, sizeof(usb_stack), 0);
+    atomThreadCreate(&usb_thread, 64, thread_start, (uint32_t)this, usb_stack, sizeof(usb_stack), 0);
   }
 };
 
@@ -133,7 +141,7 @@ DMAMEM ATOM_QUEUE TeensyUSB<irq,phy,ehci,pll>::g_usbqueue;
 
 class TeensyUSBHost1 : public TeensyUSB<IRQ_USB1, IMXRT_USBPHY1_ADDRESS, IMXRT_USB1_ADDRESS, IMXRT_CCM_ANALOG_ADDRESS+0x10> {
 public:
-	TeensyUSBHost1() = default;
+  TeensyUSBHost1() = default;
 };
 
 class TeensyUSBHost2 : public TeensyUSB<IRQ_USB2, IMXRT_USBPHY2_ADDRESS, IMXRT_USB2_ADDRESS, IMXRT_CCM_ANALOG_ADDRESS+0x20> {
@@ -147,3 +155,5 @@ public:
   TeensyUSBHost2() = default;
 #endif
 };
+
+#endif // _TEENSY4_USB_H
