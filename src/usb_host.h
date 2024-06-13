@@ -824,6 +824,7 @@ private:
 protected:
   USB_Host(usb_ehci_base_t* const base);
   void usb_process(void);
+  static const USB_Host& deviceToHost(const USB_Device* dev) { return dev->host; }
 
   // functions to be provided by derived class
 public:

@@ -111,6 +111,16 @@ FLASHMEM void USBHostBase::phy_on(usb_phy_t *const PHY) {
   PHY->PWD.REG = 0;
 }
 
+bool USBHostBase::isUSBThread(const USB_Device* p) {
+  if (p != NULL) {
+    const USBHostBase &base = static_cast<const USBHostBase&>(deviceToHost(p));
+    const ATOM_TCB* context = atomCurrentContext();
+    return (context == NULL || context == &base.usb_thread);
+  }
+  return false;
+}
+
+
 #ifdef ARDUINO_TEENSY41
 FLASHMEM TeensyUSBHost2::TeensyUSBHost2() {
   // enable USB protection IC GPIO (initially off)
@@ -145,56 +155,60 @@ __attribute__((weak)) int usleep(useconds_t us) {
  * the calling function, which avoids using dynamic memory.
  */
 template <class req_fn>
-static int sync_message(const req_fn &req) {
+static int sync_message(const USB_Device* dev, const req_fn &req) {
   ATOM_SEM sem;
   int result = -1;
-  if (atomSemCreate(&sem, 0) == ATOM_OK) {
-    int xfer_r;
-    // order of operations is tricky here, follow the numbers
-    auto fn = [&](int r) {
-      // USB Host thread performs this action when transfer is complete
-      xfer_r = r;         // 4: actual result of the transfer is stored
-      atomSemPut(&sem);   // 5: unblock main thread
-    };
-    result = req(fn);     // 1: queue async Control/Bulk/InterruptMessage request
-    if (result >= 0) {    // 2: result of attempt to queue the transfer is checked
-      if (atomSemGet(&sem, 0) == ATOM_OK) {
-                          // 3: main thread blocked on semaphore
-        result = xfer_r;
-        if (result < 0) { // 6: result of the transfer is checked
-          errno = -result;
+  if (USBHostBase::isUSBThread(dev) == true) {
+    errno = EDEADLK;
+  } else {
+    if (atomSemCreate(&sem, 0) == ATOM_OK) {
+      int xfer_r;
+      // order of operations is tricky here, follow the numbers
+      auto fn = [&](int r) {
+        // USB Host thread performs this action when transfer is complete
+        xfer_r = r;         // 4: actual result of the transfer is stored
+        atomSemPut(&sem);   // 5: unblock main thread
+      };
+      result = req(fn);     // 1: queue async Control/Bulk/InterruptMessage request
+      if (result >= 0) {    // 2: result of attempt to queue the transfer is checked
+        if (atomSemGet(&sem, 0) == ATOM_OK) {
+                            // 3: main thread blocked on semaphore
+          result = xfer_r;
+          if (result < 0) { // 6: result of the transfer is checked
+            errno = -result;
+          }
+        } else {
+          result = -1;
+          errno = EINTR;
         }
-      } else {
-        result = -1;
-        errno = EINTR;
       }
+      atomSemDelete(&sem);
     }
-    atomSemDelete(&sem);
+    else errno = ENOMEM;
   }
-  else errno = ENOMEM;
   return result;
 }
 
 int USB_Driver::ControlMessage(uint8_t bmRequestType, uint8_t bmRequest, uint16_t wValue, uint16_t wIndex, uint16_t wLength, void *data) {
-  return sync_message([=](const USBCallback &cb)->int {
+  return sync_message(getDevice(), [=](const USBCallback &cb)->int {
     return ControlMessage(bmRequestType, bmRequest, wValue, wIndex, wLength, data, &cb);
   });
 }
 
 int USB_Driver::BulkMessage(uint8_t bEndpoint, uint32_t dLength, void *data) {
-  return sync_message([=](const USBCallback &cb)->int {
+  return sync_message(getDevice(), [=](const USBCallback &cb)->int {
     return BulkMessage(bEndpoint, dLength, data, &cb);
   });
 }
 
 int USB_Driver::InterruptMessage(uint8_t bEndpoint, uint16_t wLength, void *data) {
-  return sync_message([=](const USBCallback &cb)->int {
+  return sync_message(getDevice(), [=](const USBCallback &cb)->int {
     return InterruptMessage(bEndpoint, wLength, data, &cb);
   });
 }
 
 int USB_Driver::IsochronousMessage(uint8_t bEndpoint, isolength& Lengths, void *data) {
-  return sync_message([=,&Lengths](const USBCallback &cb)->int {
+  return sync_message(getDevice(), [=,&Lengths](const USBCallback &cb)->int {
     return IsochronousMessage(bEndpoint, Lengths, data, &cb);
   });
 }

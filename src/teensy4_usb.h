@@ -71,6 +71,7 @@ public:
   void begin(void) {
     atomThreadCreate(&usb_thread, 64, thread_start, (uint32_t)this, usb_stack, sizeof(usb_stack), 0);
   }
+  static bool isUSBThread(const USB_Device*);
 };
 
 template <IRQ_NUMBER_t irq, uint32_t phy, uint32_t ehci, uint32_t pll>
