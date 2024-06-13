@@ -20,9 +20,6 @@
 // language used for descriptor strings - nearly all devices only support US language
 #define USB_LANG 0x0409
 
-// any global definition of PI (3.1415...) should be M_PI, get rid of it
-#undef PI
-
 typedef std::function<void(int)> USBCallback;
 typedef int16_t isolength[8];
 
@@ -42,7 +39,7 @@ typedef struct {
     const uint32_t :3;
     const uint32_t N_PCC:4;
     const uint32_t N_CC:4;
-    const uint32_t PI:1;
+    const uint32_t P_INDICATOR:1;
     const uint32_t :3;
     const uint32_t N_PTT:4;
     const uint32_t N_TT:4;

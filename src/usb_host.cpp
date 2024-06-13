@@ -1,5 +1,6 @@
 #include <atomic>
 #include "usb_host.h"
+#include "portab.h"
 
 #include <cerrno>
 #include <cstring>
@@ -8,7 +9,6 @@
 #include <codecvt>
 #include <unistd.h>
 
-#include "../utility/portab.h"
 
 #define MK_BE16(a, b) (((a)<<8)|(b))
 #define MK_SETUP64(bmrt,bmr,wv,wi,wl) ((((uint64_t)(bmrt))<<56)|(((uint64_t)(bmr))<<48)|(((uint64_t)(wv))<<32)|(((uint64_t)(wi))<<16)|((uint64_t)(wl)))
