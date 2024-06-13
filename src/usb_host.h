@@ -125,11 +125,9 @@ typedef struct itd_transfer : usb_iTD_t {
   struct itd_transfer *next;
   CCallback<itd_transfer> *cb;
   uint32_t frame;
-  void* buffer;
   uint8_t s_mask;
   uint32_t link_to() const { return (uint32_t)&horizontal_link; }
 } itd_transfer;
-
 
 // SPLIT-TRANSACTION ISOCHRONOUS TRANSACTION DESCRIPTOR: FIXED LAYOUT (32-BYTE ALIGNED)
 typedef struct __attribute__((aligned(32))) usb_siTD_t {
@@ -174,7 +172,6 @@ typedef struct sitd_transfer : usb_siTD_t {
   struct sitd_transfer *next;
   CCallback<sitd_transfer> *cb;
   uint32_t frame;
-  void* buffer;
   int16_t length;
   uint32_t link_to() const { return ((uint32_t)&horizontal_link)|4; }
 } sitd_transfer;
@@ -286,8 +283,7 @@ public:
 class USB_Endpoint {
 protected:
   USB_Endpoint(uint8_t _ep_type) :
-  ep_type(_ep_type) {
-  }
+  ep_type(_ep_type) {}
 public:
   class USB_Endpoint* host_next = NULL;
   class USB_Device* device = NULL;
@@ -327,13 +323,16 @@ public:
 
 class USB_Periodic_Endpoint : public USB_Endpoint {
 private:
-  PeriodicScheduler *scheduler = NULL;
+  PeriodicScheduler &scheduler;
 protected:
-  using USB_Endpoint::USB_Endpoint;
+  USB_Periodic_Endpoint(uint8_t ep_type, PeriodicScheduler& _scheduler) :
+  USB_Endpoint(ep_type),
+  scheduler(_scheduler) {}
+
   virtual void new_offset(void) = 0;
-  bool add_node(uint32_t frame, uint32_t link_to, uint32_t interval) const { return scheduler ? scheduler->add_node(frame, link_to, interval) : false; }
-  bool remove_node(uint32_t frame, uint32_t link_to, uint32_t next) const { return scheduler ? scheduler->remove_node(frame, link_to, next) : false; }
-  uint32_t current_uframe(void) const { return scheduler ? scheduler->current_uframe() : 0; }
+  bool add_node(uint32_t frame, uint32_t link_to, uint32_t interval) const { return scheduler.add_node(frame, link_to, interval); }
+  bool remove_node(uint32_t frame, uint32_t link_to, uint32_t next) const { return scheduler.remove_node(frame, link_to, next); }
+  uint32_t current_uframe(void) const { return scheduler.current_uframe(); }
 
 public:
   uint32_t interval = 0; // calculated interval in uframes, mapped to PERIODIC_LIST_SIZE*8
@@ -341,7 +340,7 @@ public:
   uint8_t stime = 0;
   uint8_t ctime = 0;
 
-  void activate(uint32_t _offset, PeriodicScheduler *s) { scheduler = s; offset = _offset; new_offset(); }
+  void activate(uint32_t _offset) { offset = _offset; new_offset(); }
   virtual void get_masks(uint8_t& s_mask, uint8_t& c_mask) const = 0;
   virtual bool set_inactive(void) = 0;
 };
@@ -361,29 +360,18 @@ protected:
   ~QH_Base();
 };
 
-template <class Base>
-class USB_QH_Endpoint : public QH_Base, public Base {
-protected:
-  USB_QH_Endpoint(uint8_t endpoint, uint16_t max_packet_size, uint8_t hub, uint8_t port, uint8_t address, uint8_t speed, uint8_t ep_type) :
-  QH_Base(endpoint, max_packet_size, hub, port, address, speed),
-  Base(ep_type) {
-  }
-
-public:
-  void update(void) override { QH_Base::update(); }
-  void flush(void) override { QH_Base::flush(); }
-};
-
-class USB_Async_Endpoint : public USB_QH_Endpoint<USB_Endpoint> {
+class USB_Async_Endpoint : public USB_Endpoint, public QH_Base {
 protected:
   USB_Async_Endpoint(uint8_t endpoint, uint16_t max_packet_size, uint8_t hub, uint8_t port, uint8_t address, uint8_t speed, uint8_t ep_type) :
-  USB_QH_Endpoint(endpoint, max_packet_size, hub, port, address, speed, ep_type) {
-  }
+  USB_Endpoint(ep_type),
+  QH_Base(endpoint, max_packet_size, hub, port, address, speed) {}
 public:
   void set_link(const USB_Async_Endpoint* p);
   USB_Async_Endpoint* get_link(void) {
     return static_cast<USB_Async_Endpoint*>((usb_queue_head_t*)(horizontal_link & ~0x1F));
   }
+  void update(void) override { QH_Base::update(); }
+  void flush(void) override { QH_Base::flush(); }
 };
 
 class USB_Control_Endpoint : public USB_Async_Endpoint {
@@ -411,38 +399,34 @@ public:
   }
 };
 
-template <class Endpoint_Base>
-class USB_Bulk_Interrupt_Endpoint : public Endpoint_Base {
-protected:
+class USB_Bulk_Endpoint : public USB_Async_Endpoint {
+private:
   const bool dir_in;
-  USB_Bulk_Interrupt_Endpoint(uint8_t endpoint, uint16_t max_packet_size, uint8_t address, uint8_t hub_addr, uint8_t port, uint8_t speed, uint8_t ep_type) :
-  Endpoint_Base(endpoint & 0xF, max_packet_size & 0x7FF, hub_addr, port, address, speed, ep_type),
-  dir_in(endpoint & 0x80) {
-  }
-};
-
-class USB_Bulk_Endpoint : public USB_Bulk_Interrupt_Endpoint<USB_Async_Endpoint> {
 public:
   USB_Bulk_Endpoint(uint8_t endpoint, uint16_t max_packet_size, uint8_t address, uint8_t hub_addr, uint8_t port, uint8_t speed) :
-  USB_Bulk_Interrupt_Endpoint(endpoint, max_packet_size, address, hub_addr, port, speed, USB_ENDPOINT_BULK) {
-  }
+  USB_Async_Endpoint(endpoint & 0xF, max_packet_size & 0x7FF, hub_addr, port, address, speed, USB_ENDPOINT_BULK),
+  dir_in(endpoint & 0x80) {}
 
-  int BulkTransfer(uint32_t Length, void *buffer, const USBCallback* cb) {
+  int BulkTransfer(uint32_t Length, void *buffer, const USBCallback* cb) override {
     return BulkIntrTransfer(dir_in, Length, buffer, cb);
   }
 };
 
-class USB_Interrupt_Endpoint : public USB_Bulk_Interrupt_Endpoint<USB_QH_Endpoint<USB_Periodic_Endpoint>> {
+class USB_Interrupt_Endpoint : public USB_Periodic_Endpoint, public QH_Base {
 private:
+  const bool dir_in;
   void new_offset(void) override;
 public:
   void get_masks(uint8_t& s_mask, uint8_t& c_mask) const override { s_mask = capabilities.s_mask, c_mask = capabilities.c_mask; }
   bool set_inactive(void) override;
 
-  USB_Interrupt_Endpoint(uint8_t endpoint, uint16_t max_packet_size, uint8_t address, uint8_t hub_addr, uint8_t port, uint8_t speed, uint32_t interval);
-  int InterruptTransfer(uint32_t Length, void *buffer, const USBCallback* cb) {
+  USB_Interrupt_Endpoint(uint8_t endpoint, uint16_t max_packet_size, uint8_t address, uint8_t hub_addr, uint8_t port, uint8_t speed, uint32_t interval, PeriodicScheduler&);
+  int InterruptTransfer(uint32_t Length, void *buffer, const USBCallback* cb) override {
     return BulkIntrTransfer(dir_in, Length, buffer, cb);
   }
+
+  void update(void) override { QH_Base::update(); }
+  void flush(void) override { QH_Base::flush(); }
 };
 
 class USB_ISO_Full_Endpoint : public USB_Periodic_Endpoint {
@@ -463,7 +447,7 @@ public:
   void new_offset(void) override;
   bool set_inactive(void) override;
 
-  USB_ISO_Full_Endpoint(uint8_t endpoint, uint16_t max_packet_size, uint8_t address, uint8_t hub_addr, uint8_t port, uint32_t interval);
+  USB_ISO_Full_Endpoint(uint8_t endpoint, uint16_t max_packet_size, uint8_t address, uint8_t hub_addr, uint8_t port, uint32_t interval, PeriodicScheduler&);
   ~USB_ISO_Full_Endpoint();
 
   void get_masks(uint8_t& smask, uint8_t& cmask) const override {smask = s_mask, cmask = c_mask;}
@@ -764,7 +748,7 @@ protected:
 
 template <class Driver> typename USB_Driver_FactoryGlue<Driver>::Register USB_Driver_FactoryGlue<Driver>::auto_reg;
 
-class USB_Host : protected USB_Hub, private CCallback<usb_control_transfer>, private PeriodicScheduler {
+class USB_Host : protected USB_Hub, private CCallback<usb_control_transfer>, public PeriodicScheduler {
 private:
   usb_ehci_cmd_t* const EHCI;
   uint32_t addresses[128/32];
