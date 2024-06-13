@@ -112,14 +112,12 @@ FLASHMEM void USBHostBase::phy_on(usb_phy_t *const PHY) {
 }
 
 #ifdef ARDUINO_TEENSY41
-FLASHMEM void TeensyUSBHost2::thread(void) {
+FLASHMEM TeensyUSBHost2::TeensyUSBHost2() {
   // enable USB protection IC GPIO (initially off)
   IOMUXC_SW_MUX_CTL_PAD_GPIO_EMC_40 = 5;
   IOMUXC_SW_PAD_CTL_PAD_GPIO_EMC_40 = 0x0008;  // slow speed, weak 150 ohm drive
   GPIO8_GDIR |= 1 << 26;
   GPIO8_DR_CLEAR = 1 << 26;
-
-  TeensyUSB::thread();
 }
 
 void TeensyUSBHost2::port_power(uint8_t port, bool set) {

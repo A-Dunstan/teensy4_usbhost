@@ -139,9 +139,11 @@ public:
 class TeensyUSBHost2 : public TeensyUSB<IRQ_USB2, IMXRT_USBPHY2_ADDRESS, IMXRT_USB2_ADDRESS, IMXRT_CCM_ANALOG_ADDRESS+0x20> {
 #ifdef ARDUINO_TEENSY41
 private:
-	void thread(void);
-	void port_power(uint8_t port, bool set);
-#endif
+  void port_power(uint8_t port, bool set);
 public:
-	TeensyUSBHost2()  = default;
+  TeensyUSBHost2();
+#else
+public:
+  TeensyUSBHost2() = default;
+#endif
 };
