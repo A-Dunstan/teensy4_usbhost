@@ -30,7 +30,7 @@ private:
   const uint8_t hs_port;
   // atomic refcount not needed, all access comes from the USB_Host thread
   unsigned int refcount;
-  usb_hub_descriptor hub_desc;
+  uint8_t bNbrPorts;
   uint8_t __attribute__((aligned(32))) port_change[32];
 
   USB_Hub_Driver(USB_Device*,uint8_t status);
@@ -60,7 +60,7 @@ USB_Driver_FactoryGlue<USB_Hub_Driver>(d),
 USB_Hub(d->speed==2 ? d->address : d->hub_addr),dev(d),status_ep(status),hs_port(d->speed==2 ? 16 : d->port) {
   refcount = 1;
   // get the hub descriptor
-  memset(&hub_desc, 0, sizeof(hub_desc));
+  bNbrPorts = 0;
   dprintf("Attempting to get HUB descriptor...\n");
   dev->ControlTransfer(USB_CTRLTYPE_DIR_DEVICE2HOST|USB_CTRLTYPE_TYPE_CLASS|USB_CTRLTYPE_REC_DEVICE, \
     USB_REQ_GET_DESCRIPTOR, USB_DT_HUB<<8, 0, 255, NULL, this);
@@ -76,7 +76,7 @@ void USB_Hub_Driver::detach(void) {
     }
   };
   // send status for each port saying it is powered only (disconnect all devices)
-  for (uint8_t i=1; i <= hub_desc.bNbrPorts; i++) {
+  for (uint8_t i=1; i <= bNbrPorts; i++) {
     msg.port.port = i;
     putMessage(msg);
   }
@@ -127,7 +127,7 @@ USB_Driver* USB_Hub_Driver::attach_config(const usb_device_descriptor *d, const 
 void USB_Hub_Driver::int_callback(int result) {
   if (result >= 1) {
     dprintf("Hub<%p>: hub interrupt %02X (%d)\n", this, port_change[0], result);
-    for (uint8_t i=1; i <= hub_desc.bNbrPorts; i++) {
+    for (uint8_t i=1; i <= bNbrPorts; i++) {
       if (port_change[0] & (1<<i)) {
         dprintf("Requesting status for port %u\n", i);
         request_status(i);
@@ -177,15 +177,15 @@ void USB_Hub_Driver::callback(const usb_control_transfer *t, int result) {
       }
       break;
     case MK_BE16(USB_CTRLTYPE_DIR_DEVICE2HOST|USB_CTRLTYPE_TYPE_CLASS|USB_CTRLTYPE_REC_DEVICE,USB_REQ_GET_DESCRIPTOR):
-      const uint8_t *desc = (const uint8_t*)t->getBuffer();
-      if (USB_Device::validate_descriptor(desc, result) == USB_DT_HUB) {
-        memcpy(&hub_desc, desc, sizeof(hub_desc));
+      const usb_hub_descriptor *desc = (const usb_hub_descriptor*)t->getBuffer();
+      if (USB_Device::validate_descriptor((const uint8_t*)desc, result) == USB_DT_HUB) {
+        bNbrPorts = desc->bNbrPorts;
         dprintf("Hub<%p> Hub Descriptor:\n", this);
-        dprintf("   bNbrPorts %d\n   wHubCharacteristics %04X\n   bPwrOn2PwrGood %d\n", hub_desc.bNbrPorts, hub_desc.wHubCharacteristics, hub_desc.bPwrOn2PwrGood);
-        dprintf("   bHubContrCurrent %d\n   DeviceRemovable %02X\n", hub_desc.bHubContrCurrent, hub_desc.DeviceRemovable);
+        dprintf("   bNbrPorts %d\n   wHubCharacteristics %04X\n   bPwrOn2PwrGood %d\n", desc->bNbrPorts, desc->wHubCharacteristics, desc->bPwrOn2PwrGood);
+        dprintf("   bHubContrCurrent %d\n   DeviceRemovable %02X\n", desc->bHubContrCurrent, desc->DeviceRemovable);
         port_change[0] = 0;
         // get status of each port
-        for (uint8_t i=1; i <= hub_desc.bNbrPorts; i++) {
+        for (uint8_t i=1; i <= bNbrPorts; i++) {
           port_change[0] |= 1<<i;
           request_status(i);
         }
