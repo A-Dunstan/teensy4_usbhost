@@ -4,11 +4,9 @@
  */
 
 #include <vector>
-#include <teensy4_usb.h>
-#include <usb_util.h>
-
 #define USE_MASS_STORAGE_FAT
-#include <usb_drivers.h>
+#include <teensy4_usbhost.h>
+#include <usbhost_utility.h>
 
 DMAMEM TeensyUSBHost2 usb;
 

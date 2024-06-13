@@ -146,4 +146,4 @@ typedef struct {
   uint8_t DeviceRemovable;
 } __attribute__((packed)) usb_hub_descriptor;
 
-#endif
+#endif // _USB_SPEC_H

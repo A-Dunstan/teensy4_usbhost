@@ -1,8 +1,6 @@
-#include <teensy4_usb.h>
-#include <MTP_Teensy.h>
-
 #define USE_MASS_STORAGE_FAT
-#include <usb_drivers.h>
+#include <teensy4_usbhost.h>
+#include <MTP_Teensy.h>
 
 // SET TEENSY USB TYPE TO "Serial + MTP Disk"
 // LED ON = USB drive is mounted, should be accessible via MTP

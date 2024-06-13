@@ -1,9 +1,50 @@
+/*
+  Copyright (C) 2024 Andrew Dunstan
+  This file is part of teensy4_usbhost.
+
+  teensy4_usbhost is free software: you can redistribute it and/or modify
+  it under the terms of the GNU General Public License as published by
+  the Free Software Foundation, either version 3 of the License, or
+  (at your option) any later version.
+
+  This program is distributed in the hope that it will be useful,
+  but WITHOUT ANY WARRANTY; without even the implied warranty of
+  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  GNU General Public License for more details.
+
+  You should have received a copy of the GNU General Public License
+  along with this program.  If not, see <http://www.gnu.org/licenses/>.
+*/
+
 #include <Arduino.h>
 #include <unistd.h>  // usleep
-#include "teensy4_usb.h"
+#include "teensy4_usbhost.h"
+
+typedef struct REG32_QUAD_t {
+  volatile uint32_t REG;
+  volatile uint32_t SET;
+  volatile uint32_t CLR;
+  volatile uint32_t TOG;
+} REG32_QUAD_t;
+
+typedef struct usb_phy_t {
+  REG32_QUAD_t PWD;
+  REG32_QUAD_t TX;
+  REG32_QUAD_t RX;
+  REG32_QUAD_t CTRL;
+  volatile uint32_t status;
+  REG32_QUAD_t DEBUG;
+  volatile uint32_t debug0;
+  REG32_QUAD_t DEBUG1;
+  volatile uint32_t version;
+} usb_phy_t;
+
+uint32_t USBHostBase::getMillis(void) {
+  return millis();
+}
 
 bool USBHostBase::getMessage(usb_msg_t &msg) {
-  uint8_t s = atomQueueGet(usbqueue, 0, (uint8_t *)&msg);
+  uint8_t s = atomQueueGet(&usbqueue, 0, (uint8_t *)&msg);
   if (s != ATOM_OK)
     digitalWriteFast(LED_BUILTIN, HIGH);
   // release used timers now
@@ -13,7 +54,7 @@ bool USBHostBase::getMessage(usb_msg_t &msg) {
 }
 
 bool USBHostBase::putMessage(usb_msg_t &msg) {
-  if (atomQueuePut(usbqueue, -1, (uint8_t *)&msg) != ATOM_OK) {
+  if (atomQueuePut(&usbqueue, -1, (uint8_t *)&msg) != ATOM_OK) {
     digitalWriteFast(LED_BUILTIN, HIGH);
     return false;
   }
@@ -21,7 +62,7 @@ bool USBHostBase::putMessage(usb_msg_t &msg) {
 }
 
 bool USBHostBase::timerMsg(usb_msg_t &msg, uint32_t ms) {
-  TimerMsg *t = new (std::nothrow) TimerMsg(msg, ms, this);
+  TimerMsg *t = new (std::nothrow) TimerMsg(msg, ms, *this);
   if (t != NULL) {
     if (atomTimerRegister(t) == ATOM_OK)
       return true;
@@ -34,7 +75,7 @@ bool USBHostBase::timerMsg(usb_msg_t &msg, uint32_t ms) {
 
 void USBHostBase::TimerMsg::timer_callback(POINTER cb_data) {
   TimerMsg *p = (TimerMsg *)cb_data;
-  if (atomQueuePut(p->host->usbqueue, -1, (uint8_t *)&p->msg) == ATOM_WOULDBLOCK) {
+  if (atomQueuePut(&p->host.usbqueue, -1, (uint8_t *)&p->msg) == ATOM_WOULDBLOCK) {
     // queue is full, reschedule to try again
     p->cb_ticks = 1;
     if (atomTimerRegister(p) == ATOM_OK)
@@ -45,13 +86,14 @@ void USBHostBase::TimerMsg::timer_callback(POINTER cb_data) {
   /* can't delete TimerMsg here because we're in interrupt context
     * so add it to the list to be released later
     */
-  std::atomic<class TimerMsg*> &release_list = p->host->timerRelease;
+  std::atomic<class TimerMsg*> &release_list = p->host.timerRelease;
   p->next = release_list.load(std::memory_order_relaxed);
   while (!release_list.compare_exchange_weak(p->next, p, std::memory_order_relaxed));
 }
 
-USBHostBase::TimerMsg::TimerMsg(const usb_msg_t &_msg, uint32_t ms, USBHostBase *h)
-  : msg(_msg), host(h) {
+USBHostBase::TimerMsg::TimerMsg(const usb_msg_t &_msg, uint32_t ms, USBHostBase &h) :
+msg(_msg),
+host(h) {
   cb_func = timer_callback;
   cb_data = this;
   cb_ticks = (ms * SYSTEM_TICKS_PER_SEC + 999) / 1000;
@@ -63,7 +105,9 @@ USBHostBase::TimerMsg::~TimerMsg() {
   delete next;
 }
 
-FLASHMEM USBHostBase::USBHostBase(ATOM_QUEUE *q, usb_ehci_base_t *usb) : USB_Host(usb), usbqueue(q) {
+FLASHMEM USBHostBase::USBHostBase(ATOM_QUEUE &q, usb_ehci_base_t *usb) :
+USB_Host(usb),
+usbqueue(q) {
   timerRelease = NULL;
 }
 
@@ -111,6 +155,10 @@ FLASHMEM void USBHostBase::phy_on(usb_phy_t *const PHY) {
   PHY->PWD.REG = 0;
 }
 
+void USBHostBase::begin(void) {
+  atomThreadCreate(&usb_thread, 64, thread_start, (uint32_t)this, usb_stack, sizeof(usb_stack), 0);
+}
+
 bool USBHostBase::isUSBThread(const USB_Device* p) {
   if (p != NULL) {
     const USBHostBase &base = static_cast<const USBHostBase&>(deviceToHost(p));
@@ -120,6 +168,63 @@ bool USBHostBase::isUSBThread(const USB_Device* p) {
   return false;
 }
 
+template <IRQ_NUMBER_t irq, uint32_t phy, uint32_t ehci, uint32_t pll>
+void TeensyUSB<irq,phy,ehci,pll>::nextIRQ(void) {
+  /* make sure any EHCI register writes are complete before clearing pending interrupts,
+   * otherwise it may immediately re-pend
+   */
+  asm volatile("dmb");
+  NVIC_CLEAR_PENDING(irq);
+  NVIC_ENABLE_IRQ(irq);
+}
+
+template <IRQ_NUMBER_t irq, uint32_t phy, uint32_t ehci, uint32_t pll>
+void TeensyUSB<irq,phy,ehci,pll>::setHostMode(void) {
+  volatile uint32_t* HOST_EHCI = (volatile uint32_t*)ehci;
+  HOST_EHCI[OFFSET_EHCI_USBMODE/4] = USB_USBMODE_CM(3); // 3 = host mode
+  // setting SBUSCFG to anything other than 0 causes random issues...
+  HOST_EHCI[OFFSET_EHCI_SBUSCFG/4] = 0;
+}
+
+template <IRQ_NUMBER_t irq, uint32_t phy, uint32_t ehci, uint32_t pll>
+void TeensyUSB<irq,phy,ehci,pll>::phySetHighSpeed(uint8_t port, bool on) {
+  usb_phy_t* HOST_PHY = (usb_phy_t*)phy;
+  if (on)
+    HOST_PHY->CTRL.SET = USBPHY_CTRL_ENHOSTDISCONDETECT;
+  else
+    HOST_PHY->CTRL.CLR = USBPHY_CTRL_ENHOSTDISCONDETECT;
+}
+
+template <IRQ_NUMBER_t irq, uint32_t phy, uint32_t ehci, uint32_t pll>
+void TeensyUSB<irq,phy,ehci,pll>::usb_isr(void) {
+  usb_msg_t intmsg = { USB_MSG_INTERRUPT };
+  NVIC_DISABLE_IRQ(irq);
+  atomIntEnter();
+  if (atomQueuePut(&g_usbqueue, -1, (uint8_t*)&intmsg) != ATOM_OK)
+    digitalWriteFast(LED_BUILTIN, HIGH);
+  atomIntExit(0);
+}
+
+template <IRQ_NUMBER_t irq, uint32_t phy, uint32_t ehci, uint32_t pll>
+void TeensyUSB<irq,phy,ehci,pll>::thread(void) {
+  usb_msg_t msgs[50];
+  atomQueueCreate(&g_usbqueue, (uint8_t *)msgs, sizeof(msgs[0]), sizeof(msgs) / sizeof(msgs[0]));
+
+  attachInterruptVector(irq, usb_isr);
+  init_pll((struct REG32_QUAD_t*)pll);
+
+  // ungate clock
+  CCM_CCGR6 |= CCM_CCGR6_USBOH3(CCM_CCGR_ON);
+  phy_on((struct usb_phy_t *)phy);
+
+  atomTimerDelay(10 * SYSTEM_TICKS_PER_SEC / 1000);  // 10ms
+
+  NVIC_ENABLE_IRQ(irq);
+  usb_process();
+
+  NVIC_DISABLE_IRQ(irq);
+  atomQueueDelete(&g_usbqueue);
+}
 
 #ifdef ARDUINO_TEENSY41
 FLASHMEM TeensyUSBHost2::TeensyUSBHost2() {

@@ -1,7 +1,9 @@
-#include <teensyatom.h>
+#ifndef _USB_CH341_SERIAL_H
+#define _USB_CH341_SERIAL_H
+
+#include <teensy4_usbhost.h>
 #include <HardwareSerial.h>
 #include <EventResponder.h>
-#include "usb_host.h"
 
 #define CH341_MIN_BPS      50
 #define CH341_MAX_BPS      2000000
@@ -104,3 +106,5 @@ public:
 };
 
 } // namespace ch341
+
+#endif // _USB_CH341_SERIAL_H

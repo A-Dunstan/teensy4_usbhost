@@ -1,8 +1,6 @@
-#include <teensy4_usb.h>
-#include <cerrno>
-
 #define USE_MASS_STORAGE
-#include <usb_drivers.h>
+#include <teensy4_usbhost.h>
+#include <cerrno>
 
 static DMAMEM TeensyUSBHost2 usb;
 

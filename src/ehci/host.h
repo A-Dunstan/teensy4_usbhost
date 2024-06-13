@@ -1,5 +1,5 @@
-#ifndef _USB_HOST
-#define _USB_HOST
+#ifndef _USB_HOST_H
+#define _USB_HOST_H
 
 #include <map>
 #include <vector>
@@ -8,7 +8,7 @@
 #include <functional>
 #include <pgmspace.h>
 
-#include "usb_spec.h"
+#include "spec.h"
 
 #if 1
 #define dprintf(fmt, ...) ::printf(PSTR(fmt) __VA_OPT__(,) __VA_ARGS__)
@@ -822,4 +822,4 @@ public:
   bool deactivate_endpoint(USB_Endpoint *ep);
 };
 
-#endif
+#endif // _USB_HOST_H

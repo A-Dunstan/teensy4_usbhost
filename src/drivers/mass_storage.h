@@ -1,10 +1,9 @@
-#include <teensyatom.h>
-#include <atomic>
-#include <list>
-#include "usb_host.h"
-
 #ifndef _USB_MASS_STORAGE_H
 #define _USB_MASS_STORAGE_H
+
+#include <teensy4_usbhost.h>
+#include <atomic>
+#include <list>
 
 typedef struct __attribute__((packed)) ms_cbw {
   uint32_t dCBWSignature;
@@ -207,4 +206,4 @@ typedef struct basic_sense_data {
   uint8_t sense_key_specific[3];
 } basic_sense_data;
 
-#endif
+#endif // _USB_MASS_STORAGE_H

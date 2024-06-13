@@ -1,13 +1,11 @@
 #include <SD.h>
 #include <Audio.h>
 
-#include <teensy4_usb.h>
+#define USE_MASS_STORAGE
+#include <teensy4_usbhost.h>
 #include <cerrno>
 #include <cstdlib>
 #include <malloc.h>
-
-#define USE_MASS_STORAGE
-#include "usb_drivers.h"
 
 #define SCSI_MODE_SENSE_6      0x1A
 #define SCSI_START_STOP        0x1B
@@ -93,7 +91,7 @@ static bool usb_supports_cdda(USB_Storage *usb, uint8_t lun) {
 
   int len = usb->scsi_cmd(lun, mode_sense_length, sizeof(mode_sense_length), cmd, false);
   if (len >= 2) {
-    len = 2 + (mode_sense_length[0]<<8) + mode_sense_length[1];    
+    len = 2 + (mode_sense_length[0]<<8) + mode_sense_length[1];
   }
   if (len <= 8) {
     Serial.printf("MODE_SENSE command failed: %d(%d)\n", len, errno);

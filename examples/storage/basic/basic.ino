@@ -6,11 +6,9 @@
  * to initialize themselves and become ready.
  */
 
-#include <teensy4_usb.h>
-#include <usb_util.h>
-
 #define USE_MASS_STORAGE_FAT
-#include "usb_drivers.h"
+#include <teensy4_usbhost.h>
+#include <usbhost_utility.h>
 
 static DMAMEM TeensyUSBHost2 usb;
 static USB_FAT_Volume USBVol;
@@ -23,7 +21,7 @@ void setup() {
   } while (stimer < 5000);
 
   if (CrashReport) CrashReport.printTo(Serial);
-  
+
   usb.begin();
   USBVol.begin();
   delay(1000);
@@ -39,7 +37,7 @@ void loop() {
       }
       delay(100);
     }
-    
+
     Serial.print("Found a ");
     switch (USBVol.type()) {
       case 12: Serial.print("FAT12 "); break;
