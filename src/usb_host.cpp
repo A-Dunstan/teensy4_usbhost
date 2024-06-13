@@ -86,9 +86,9 @@ void QH_Base::update(void) {
         t = n;
       } else {
         while (t->cb == NULL) {
-          usb_transfer *n = static_cast<usb_transfer*>(t->next);
+          usb_transfer &n = static_cast<usb_transfer&>(*t->next);
           delete t;
-          t = n;
+          t = &n;
         }
       }
 
@@ -109,10 +109,10 @@ void QH_Base::update(void) {
       if (ret && IS_QTD_PTR_VALID(t->alt)) {
         pending = static_cast<usb_transfer*>(t->alt);
         while (t->cb == NULL) {
-          usb_transfer *n = static_cast<usb_transfer*>(t->next);
+          usb_transfer &n = static_cast<usb_transfer&>(*t->next);
           delete t;
-          ret += n->token.total;
-          t = n;
+          ret += n.token.total;
+          t = &n;
         }
       }
       else {
@@ -1154,8 +1154,8 @@ void USB_Device::callback(const usb_control_transfer *t, int result) {
                 * fails just put the message directly on the host queue.
                 */
                 refcount.fetch_add(1);
-                if (host->timerMsg(msg, 10) == false) {
-                  if (host->putMessage(msg) == false) {
+                if (host.timerMsg(msg, 10) == false) {
+                  if (host.putMessage(msg) == false) {
                     // have to give up, driver won't be hooked and
                     // configuration/interfaces won't be activated
                     deref();
@@ -1253,13 +1253,13 @@ void USB_Device::deref(void) {
       .type = USB_MSG_ADDRESS_RELEASED,
       .address = address
     };
-    host->putMessage(msg);
+    host.putMessage(msg);
     dprintf("USB_Device<%p> deleted\n", this);
     delete this;
   }
 }
 
-USB_Device::USB_Device(USB_Host* _host, uint8_t _hub_addr, uint8_t _port, uint8_t _speed, uint8_t _address, uint8_t control_packet_size) :
+USB_Device::USB_Device(USB_Host& _host, uint8_t _hub_addr, uint8_t _port, uint8_t _speed, uint8_t _address, uint8_t control_packet_size) :
 control(control_packet_size, _address, _hub_addr, _port, _speed),
 host(_host),
 hub_addr(_hub_addr),
@@ -1273,7 +1273,7 @@ refcount(2) // hub and control endpoint have a reference
   string_lang = 0;
   active_config = -1;
   pending_config = -1;
-  host->activate_endpoint(&control, this);
+  host.activate_endpoint(&control, this);
 }
 
 void USB_Device::disconnect(void) {
@@ -1282,7 +1282,7 @@ void USB_Device::disconnect(void) {
     deactivate_endpoint(i);
     deactivate_endpoint(0x80|i);
   }
-  host->deactivate_endpoint(&control);
+  host.deactivate_endpoint(&control);
   deref();
 }
 
@@ -1374,7 +1374,7 @@ void USB_Device::search_for_drivers(void) {
 
 void USB_Device::deactivate_endpoint(size_t i) {
   if (Endpoints[i].type >= 0) {
-    host->deactivate_endpoint(Endpoints[i].ep);
+    host.deactivate_endpoint(Endpoints[i].ep);
     Endpoints[i].type = -1;
     Endpoints[i].ep = NULL;
   }
@@ -1393,7 +1393,7 @@ void USB_Device::activate_endpoint(const usb_endpoint_descriptor* p) {
       Endpoints[i].ep = new(std::nothrow) USB_Bulk_Endpoint(p->bEndpointAddress, p->wMaxPacketSize, address, hub_addr, port, speed);
       if (Endpoints[i].ep != NULL) {
         Endpoints[i].type = USB_ENDPOINT_BULK;
-        if (host->activate_endpoint(Endpoints[i].ep, this))
+        if (host.activate_endpoint(Endpoints[i].ep, this))
           return;
       }
       break;
@@ -1403,7 +1403,7 @@ void USB_Device::activate_endpoint(const usb_endpoint_descriptor* p) {
       Endpoints[i].ep = new(std::nothrow) USB_Interrupt_Endpoint(p->bEndpointAddress, p->wMaxPacketSize, address, hub_addr, port, speed, p->bInterval);
       if (Endpoints[i].ep != NULL) {
         Endpoints[i].type = USB_ENDPOINT_INTERRUPT;
-        if (host->activate_endpoint(Endpoints[i].ep, this))
+        if (host.activate_endpoint(Endpoints[i].ep, this))
           return;
       }
       break;
@@ -1426,7 +1426,7 @@ void USB_Device::activate_endpoint(const usb_endpoint_descriptor* p) {
       }
       if (Endpoints[i].ep != NULL) {
         Endpoints[i].type = USB_ENDPOINT_ISOCHRONOUS;
-        if (host->activate_endpoint(Endpoints[i].ep, this))
+        if (host.activate_endpoint(Endpoints[i].ep, this))
           return;
       }
       break;
@@ -1740,7 +1740,7 @@ bool USB_Device::pushMessage(usb_msg_t& msg) {
     default:
       break;
   }
-  return host->putMessage(msg);
+  return host.putMessage(msg);
 }
 
 USB_Driver::Factory::Factory() {
@@ -2042,7 +2042,7 @@ void USB_Host::callback(const usb_control_transfer* t, int result) {
 
     uint8_t address = get_address();
     if (address > 0) {
-      USB_Device *d = new(std::nothrow) USB_Device(this, hub.hub_addr, hub.base_port(port), Enum.speed, address, Enum.bMaxPacketSize);
+      USB_Device *d = new(std::nothrow) USB_Device(*this, hub.hub_addr, hub.base_port(port), Enum.speed, address, Enum.bMaxPacketSize);
       if (d != NULL) {
         hub.port[port].device = d;
         // set the address (possibly for the second time)
@@ -2348,7 +2348,7 @@ bool PeriodicScheduler::add_node(uint32_t frame, uint32_t link_to, uint32_t inte
     // insert in front of queue heads with smaller intervals, otherwise keep traversing
     if ((next & 0x1F) == 2) { // is a queue head pointer
       auto qh = (const usb_queue_head_t*)(next & ~0x1F);
-      uint32_t next_interval = static_cast<const USB_Interrupt_Endpoint*>(qh)->interval;
+      uint32_t next_interval = static_cast<const USB_Interrupt_Endpoint&>(*qh).interval;
       if (next_interval < interval)
         break;
     }

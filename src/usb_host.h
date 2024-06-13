@@ -559,7 +559,7 @@ class USB_Device : private CCallback<usb_control_transfer> {
   friend class USB_Hub_Driver;
 private:
   USB_Control_Endpoint control;
-  class USB_Host* const host;
+  class USB_Host& host;
   const uint8_t hub_addr;
   const uint8_t port;
   const uint8_t speed;
@@ -647,7 +647,7 @@ private:
   virtual void callback(const usb_control_transfer*,int) override;
   void deref(void);
 
-  USB_Device(USB_Host* _host, uint8_t _hub_addr, uint8_t _port, uint8_t _speed, uint8_t _address, uint8_t control_packet_size);
+  USB_Device(USB_Host& _host, uint8_t _hub_addr, uint8_t _port, uint8_t _speed, uint8_t _address, uint8_t control_packet_size);
   void disconnect(void);
 
   void USBMessage(const usb_msg_t&);
