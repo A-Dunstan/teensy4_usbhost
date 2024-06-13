@@ -68,48 +68,39 @@ FLASHMEM USBHostBase::USBHostBase(ATOM_QUEUE *q, usb_ehci_base_t *usb) : USB_Hos
 }
 
 FLASHMEM void USBHostBase::init_pll(REG32_QUAD_t *const PLL) {
-  dprintf("Starting USB PLL...\n");
-  while (1) {
-    // ensure any previous PLL register writes have completed before doing more
-    asm volatile("dmb");
-    uint32_t n = PLL->REG;
-    dprintf("CCM_ANALOG_PLL_USB=%08lX\n", n);
-    if (n & CCM_ANALOG_PLL_USB1_DIV_SELECT) {
-      PLL->CLR = 0xC000;                           // bypass 24MHz
-      PLL->SET = CCM_ANALOG_PLL_USB1_BYPASS;       // bypass
-      PLL->CLR = CCM_ANALOG_PLL_USB1_POWER |       // power down
-                 CCM_ANALOG_PLL_USB1_DIV_SELECT |  // use 480 MHz
-                 CCM_ANALOG_PLL_USB1_ENABLE |      // disable
-                 CCM_ANALOG_PLL_USB1_EN_USB_CLKS;  // disable usb clocks
-      continue;
-    }
-    if (!(n & CCM_ANALOG_PLL_USB1_ENABLE)) {
-      dprintf("  enable PLL\n");
-      PLL->SET = CCM_ANALOG_PLL_USB1_ENABLE;  // enable
-      continue;
-    }
-    if (!(n & CCM_ANALOG_PLL_USB1_POWER)) {
-      dprintf("  power up PLL\n");
-      PLL->SET = CCM_ANALOG_PLL_USB1_POWER;
-      continue;
-    }
-    if (!(n & CCM_ANALOG_PLL_USB1_LOCK)) {
-      dprintf("  wait for lock\n");
-      continue;
-    }
-    if (n & CCM_ANALOG_PLL_USB1_BYPASS) {
-      dprintf("  turn off bypass\n");
-      PLL->CLR = CCM_ANALOG_PLL_USB1_BYPASS;
-      continue;
-    }
-    if (!(n & CCM_ANALOG_PLL_USB1_EN_USB_CLKS)) {
-      dprintf("  enable USB clocks\n");
-      PLL->SET = CCM_ANALOG_PLL_USB1_EN_USB_CLKS;
-      continue;
-    }
-    dprintf("  USB PLL is running\n");
-    break;
-  }
+  dprintf("Starting USB PLL... ");
+  PLL->CLR = 0xC000;                              // bypass 24MHz
+  PLL->SET = CCM_ANALOG_PLL_USB1_BYPASS;          // bypass
+  PLL->CLR = CCM_ANALOG_PLL_USB1_POWER |          // power down
+             CCM_ANALOG_PLL_USB1_DIV_SELECT |     // use 480 MHz (can potentially overclock USB to 528mbps)
+             CCM_ANALOG_PLL_USB1_ENABLE |         // disable
+             CCM_ANALOG_PLL_USB1_EN_USB_CLKS;     // disable usb clocks
+  asm volatile("dmb");
+
+  // enable PLL output
+  PLL->SET = CCM_ANALOG_PLL_USB1_ENABLE;
+  asm volatile("dmb");
+  while ((PLL->REG & CCM_ANALOG_PLL_USB1_ENABLE)==0);
+
+  // enable power
+  PLL->SET = CCM_ANALOG_PLL_USB1_POWER;
+  asm volatile("dmb");
+  while ((PLL->REG & CCM_ANALOG_PLL_USB1_POWER)==0);
+
+  // wait for PLL to lock
+  while ((PLL->REG & CCM_ANALOG_PLL_USB1_LOCK)==0);
+
+  // disable bypass
+  PLL->CLR = CCM_ANALOG_PLL_USB1_BYPASS;
+  asm volatile("dmb");
+  while (PLL->REG & CCM_ANALOG_PLL_USB1_BYPASS);
+
+  // output PLL clock to USB PHY
+  PLL->SET = CCM_ANALOG_PLL_USB1_EN_USB_CLKS;
+  asm volatile("dmb");
+  while ((PLL->REG & CCM_ANALOG_PLL_USB1_EN_USB_CLKS)==0);
+
+  dprintf("done.\n");
 }
 
 FLASHMEM void USBHostBase::phy_on(usb_phy_t *const PHY) {
