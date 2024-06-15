@@ -16,10 +16,24 @@
   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#include "hub.h"
-#include <cstring>
+#ifndef _USB_PERIODICSCHEDULER_H
+#define _USB_PERIODICSCHEDULER_H
 
-USB_Hub::USB_Hub(uint8_t addr) : hub_addr(addr) {
-  memset(port, 0, sizeof(port));
-}
+#include <cstdint>
 
+class PeriodicScheduler {
+private:
+  volatile uint32_t& FRINDEX;
+protected:
+  uint32_t* periodictable;
+  PeriodicScheduler(volatile uint32_t&);
+  ~PeriodicScheduler();
+public:
+  bool add_node(uint32_t frame, uint32_t link_to, uint32_t interval);
+  bool remove_node(uint32_t frame, uint32_t link_to, uint32_t next);
+  uint32_t current_uframe(void);
+};
+
+uint32_t periodicnode_to_interval(uint32_t node);
+
+#endif // _USB_PERIODICSCHEDULER_H

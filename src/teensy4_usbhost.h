@@ -22,6 +22,7 @@
 #include <TeensyAtomThreads.h>
 #include <atomic>
 #include "ehci/host.h"
+#include "ehci/driver.h"
 #include <imxrt.h>
 
 #define USB_STACK_SIZE 1024

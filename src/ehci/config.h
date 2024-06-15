@@ -16,10 +16,13 @@
   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#include "hub.h"
-#include <cstring>
+#ifndef _USB_CONFIG_H
+#define _USB_CONFIG_H
 
-USB_Hub::USB_Hub(uint8_t addr) : hub_addr(addr) {
-  memset(port, 0, sizeof(port));
-}
+// length of periodic schedule
+#define PERIODIC_LIST_SIZE 32
 
+// language used for descriptor strings - nearly all devices only support US language
+#define USB_LANG 0x0409
+
+#endif // _USB_CONFIG_H

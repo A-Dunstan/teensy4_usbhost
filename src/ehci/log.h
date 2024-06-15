@@ -16,10 +16,16 @@
   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#include "hub.h"
-#include <cstring>
+#ifndef _USB_LOG_H
+#define _USB_LOG_H
 
-USB_Hub::USB_Hub(uint8_t addr) : hub_addr(addr) {
-  memset(port, 0, sizeof(port));
-}
+#include <cstdio>
+#include <pgmspace.h>
 
+#if 1
+#define dprintf(fmt, ...) ::printf(PSTR(fmt) __VA_OPT__(,) __VA_ARGS__)
+#else
+#define dprintf(...)
+#endif
+
+#endif // _USB_LOG_H

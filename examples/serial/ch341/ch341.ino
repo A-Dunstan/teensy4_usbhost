@@ -1,5 +1,5 @@
 #define USE_CH341
-#include "teensy4_usb.h"
+#include "teensy4_usbhost.h"
 
 DMAMEM static TeensyUSBHost2 usb;
 DMAMEM static ch341::serial USBSerial;

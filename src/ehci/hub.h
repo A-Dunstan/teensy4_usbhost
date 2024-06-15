@@ -16,10 +16,32 @@
   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#include "hub.h"
-#include <cstring>
+#ifndef _USB_HUB_H
+#define _USB_HUB_H
 
-USB_Hub::USB_Hub(uint8_t addr) : hub_addr(addr) {
-  memset(port, 0, sizeof(port));
-}
+#include <cstdint>
 
+class USB_Hub {
+  friend class USB_Host;
+private:
+  struct USB_Port {
+    uint32_t state;
+    class USB_Device *device;
+    uint32_t timeout_start;
+  } port[7];
+
+  virtual void port_power(uint8_t port, bool set) = 0;
+  virtual void port_reset(uint8_t port, bool set) = 0;
+  virtual void port_enable(uint8_t port, bool set) = 0;
+  virtual uint8_t HS_port(uint8_t port) const = 0;
+  virtual void phySetHighSpeed(uint8_t port, bool on) {}
+
+  virtual void addref(void) {}
+  virtual void deref(void) {}
+
+protected:
+  uint8_t const hub_addr;
+  USB_Hub(uint8_t addr);
+};
+
+#endif // _USB_HUB_H

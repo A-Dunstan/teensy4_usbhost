@@ -19,7 +19,7 @@
 #ifndef _USB_SPEC_H
 #define _USB_SPEC_H
 
-#include <stdint.h>
+#include <cstdint>
 
 #define USB_CTRLTYPE_DIR_HOST2DEVICE     (0<<7)
 #define USB_CTRLTYPE_DIR_DEVICE2HOST     (1<<7)
