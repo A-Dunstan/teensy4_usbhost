@@ -19,7 +19,13 @@
 #ifndef _TEENSY4_USBHOST_H
 #define _TEENSY4_USBHOST_H
 
+// prefer submodule version if it is present
+#if defined __has_include && __has_include("TeensyAtomThreads/TeensyAtomThreads.h")
+#include "TeensyAtomThreads/TeensyAtomThreads.h"
+#else
 #include <TeensyAtomThreads.h>
+#endif
+
 #include <atomic>
 #include "ehci/host.h"
 #include "ehci/driver.h"
