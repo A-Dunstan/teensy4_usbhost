@@ -20,6 +20,8 @@
 #define _USB_ENDPOINT_ISO_H
 
 #include "endpoint.h"
+#include "config.h"
+#include <bitset>
 
 struct sitd_transfer;
 struct itd_transfer;
@@ -32,8 +34,8 @@ private:
   uint8_t s_mask, c_mask;
 
   sitd_transfer* pending = NULL;
-
-  int Transfer(sitd_transfer*, int16_t length, void *buffer, CCallback<sitd_transfer>*);
+  std::bitset<PERIODIC_LIST_SIZE> frames;
+  int Schedule(sitd_transfer*);
 
 public:
   void update(void) override;
@@ -59,7 +61,7 @@ private:
   uint8_t s_mask;
 
   itd_transfer* pending = NULL;
-
+  std::bitset<PERIODIC_LIST_SIZE> frames;
   int Schedule(itd_transfer*);
 
 public:

@@ -49,7 +49,7 @@ private:
   int total_length;
 
   void callback(const CTransfer *t,int r) {
-//    dprintf("T%d %p:%d %d\n", lengths-last_length, t, t->frame>>3, r);
+//    dprintf("T%d %p:%d %d\n", lengths-last_length, t, t->frame, r);
     if (r >= 0) {
       total_length += r;
       if (buffer) {
@@ -89,75 +89,46 @@ public:
   }
 };
 
-int USB_ISO_Full_Endpoint::Transfer(sitd_transfer *t, int16_t Length, void *buffer, CCallback<sitd_transfer>* cb) {
-  memset(t, 0, sizeof(usb_siTD_t));
-  t->horizontal_link = 1;
-  t->state.val = state;
-  t->s_mask = s_mask;
-  t->c_mask = c_mask;
-  t->status = 0x80;
-  t->total = Length;
-  t->IOC = 1;
-
-  t->page0 = buffer;
-  t->page1 = (((uint32_t)buffer)>>12)+1;
-
-  t->t_count = dir_in ? 1 : ((t->total+187) / 188);
-  t->TP = (t->t_count==1) ? 0 : 1; // ALL or BEGIN
-  t->back_pointer = 1;
-
-  t->cb = cb;
-  t->length = Length;
-  t->next = NULL;
-
-  // this may take a while so do it before fetching the current uframe index
-  cache_flush_invalidate(buffer, Length);
-
+int USB_ISO_Full_Endpoint::Schedule(sitd_transfer *t) {
   uint32_t uframe_now = current_uframe();
-  // this is the cut-off point for scheduling: a full list period from now
-  uint32_t uframe_max = (uframe_now + PERIODIC_LIST_SIZE*8 - interval) & ~7;
-  // this is the earliest allowed: at least 1 full frame ahead
-  uint32_t uframe_min = (uframe_now + 9) & ~7;
-  uint32_t uframe_cur = uframe_min;
-  if (pending) {
-    // insert after all pending transfers
-    sitd_transfer *p = pending;
-    while (p->next) p = p->next;
-    uint32_t f = p->frame;
-    if (f < uframe_now) {
-      f += PERIODIC_LIST_SIZE*8;
-    }
-    if (f < uframe_max) {
-      f += interval;
-      if (f > uframe_cur) uframe_cur = f;
-    }
+  uint32_t frame_max = (uframe_now + PERIODIC_LIST_SIZE*8) >> 3;
+  uint32_t frame_min = (uframe_now + 9) >> 3;
+  uint32_t frame_cur;
+  // subtract one interval in case there is an active back pointer (siTD only)
+  if (interval < PERIODIC_LIST_SIZE*8) frame_max -= (interval+7)>>3;
+  for (frame_cur = frame_min; frame_cur < frame_max; frame_cur++) {
+    if (frames[frame_cur % PERIODIC_LIST_SIZE] == false)
+      break;
   }
-  t->frame = (uframe_cur & (~interval + 1)) + offset;
-  // 1x interval correction may be needed
-  if (t->frame < uframe_cur)
-    t->frame += interval;
 
-//  dprintf("ISO transfer<%p>: uframe_now %lu:%lu, scheduled %lu:%lu, uframe_min %lu:%lu, uframe_max %lu:%lu\n", t, uframe_now>>3, uframe_now&7, t->frame>>3, t->frame&7, uframe_min>>3, uframe_min&7, uframe_max>>3, uframe_max&7);
+  // round down to nearest interval and apply offset
+  t->frame = ((frame_cur*8 & (~interval + 1)) + offset) >> 3;
+  // may need correction applied depending on offset amount
+  if (t->frame < frame_cur)
+    t->frame = (t->frame*8 + interval) >> 3;
+
+//  dprintf("ISO transfer<%p>: uframe_now %lu:%lu, scheduled %lu, frame_min %lu, frame_max %lu\n", t, uframe_now>>3, uframe_now&7, t->frame%PERIODIC_LIST_SIZE, frame_min, frame_max);
 
   // did we find a suitable time-slot?
-  if (uframe_min <= t->frame && t->frame < uframe_max) {
-    t->frame = t->frame % (PERIODIC_LIST_SIZE*8);
+  if (frame_min <= t->frame && t->frame < frame_max && frames[t->frame % PERIODIC_LIST_SIZE]==false) {
+    t->frame = t->frame % PERIODIC_LIST_SIZE;
 
-    if (add_node(t->frame>>3, t->link_to(), 0xFFFFFFFF)) {
+    if (add_node(t->frame, t->link_to(), 0xFFFFFFFF)) {
       sitd_transfer** p = &pending;
       while (*p) p = &(*p)->next;
       *p = t;
+      frames[t->frame] = true;
       return 0;
     }
     errno = ENOBUFS;
   }
   else errno = EBUSY;
-  dprintf("Failed to add node: uframe_now %lu:%lu, scheduled %lu:%lu, uframe_min %lu:%lu, uframe_max %lu:%lu, uframe_cur %lu:%lu\n", uframe_now>>3, uframe_now&7, t->frame>>3, t->frame&7, uframe_min>>3, uframe_min&7, uframe_max>>3, uframe_max&7, uframe_cur>>3, uframe_cur&7);
+  dprintf("Failed to add node: uframe_now %lu:%lu, scheduled %lu, frame_min %lu, frame_max %lu, frame_cur %lu\n", uframe_now>>3, uframe_now&7, t->frame, frame_min, frame_max, frame_cur);
   if (pending) {
     dprintf("PENDING:");
     sitd_transfer *p = pending;
     while (p) {
-      dprintf(" %lu:%lu", p->frame>>3, p->frame&7);
+      dprintf(" %lu", p->frame);
       p = p->next;
     }
     dprintf("\n");
@@ -176,7 +147,8 @@ void USB_ISO_Full_Endpoint::update(void) {
     // todo: handle errors
 
     pending = t->next;
-    remove_node(t->frame>>3, t->link_to(), t->horizontal_link);
+    remove_node(t->frame, t->link_to(), t->horizontal_link);
+    frames[t->frame] = false;
 
     int length = t->length - t->total;
     t->cb->callback(t,length);
@@ -184,7 +156,6 @@ void USB_ISO_Full_Endpoint::update(void) {
 }
 
 void USB_ISO_Full_Endpoint::new_offset(void) {
-  dprintf("USB_ISO_Full_Endpoint<%p>: new_offset %d\n", this, offset);
   s_mask <<= (offset & 7);
   c_mask <<= (offset & 7);
 }
@@ -194,7 +165,8 @@ bool USB_ISO_Full_Endpoint::set_inactive(void) {
   while (pending) {
     sitd_transfer *t = pending;
     pending = t->next;
-    removed |= remove_node(t->frame>>3, t->link_to(), t->horizontal_link);
+    removed |= remove_node(t->frame, t->link_to(), t->horizontal_link);
+    frames[t->frame] = false;
 
     t->cb->callback(t, -ENODEV);
   }
@@ -204,7 +176,8 @@ bool USB_ISO_Full_Endpoint::set_inactive(void) {
 
 USB_ISO_Full_Endpoint::USB_ISO_Full_Endpoint(uint8_t endpoint, uint16_t max_packet_size, uint8_t address, uint8_t hub_addr, uint8_t port, uint32_t i, PeriodicScheduler& scheduler) :
 USB_Periodic_Endpoint(USB_ENDPOINT_ISOCHRONOUS, scheduler),
-dir_in(endpoint & 0x80) {
+dir_in(endpoint & 0x80),
+frames{0} {
   wMaxPacketSize = max_packet_size & 0x7FF;
   if (wMaxPacketSize >= 1024) wMaxPacketSize = 1023;
 
@@ -263,13 +236,41 @@ int USB_ISO_Full_Endpoint::IsochronousTransfer(isolength& Lengths, void *buffer,
     int16_t *pLength = Lengths;
     do {
       int16_t length = *pLength;
-      if (Transfer(t, length, dst, sg) < 0) {
+
+      memset(t, 0, sizeof(usb_siTD_t));
+      t->horizontal_link = 1;
+      t->state.val = state;
+      t->s_mask = s_mask;
+      t->c_mask = c_mask;
+      t->status = 0x80;
+      t->total = length;
+      t->IOC = 1;
+
+      t->page0 = dst;
+      t->page1 = (((uint32_t)dst)>>12)+1;
+
+      t->t_count = dir_in ? 1 : ((t->total+187) / 188);
+      t->TP = (t->t_count==1) ? 0 : 1; // ALL or BEGIN
+      t->back_pointer = 1;
+
+      t->cb = sg;
+      t->length = length;
+      t->next = NULL;
+
+      // this may take a while so do it before scheduling
+      cache_flush_invalidate(dst, length);
+
+      if (Schedule(t) < 0) {
         dprintf("Failed to schedule transfer\n");
+        do {
+          *pLength++ = 0;
+        } while (--t_count);
         break;
       }
       sg->add_count();
       dst += length;
-      t++;
+      ++t;
+      ++pLength;
     } while (--t_count);
 
     if (sg->get_count() > 0)
@@ -282,46 +283,42 @@ int USB_ISO_Full_Endpoint::IsochronousTransfer(isolength& Lengths, void *buffer,
 
 int USB_ISO_High_Endpoint::Schedule(itd_transfer *t) {
   uint32_t uframe_now = current_uframe();
-  uint32_t uframe_max = (uframe_now + PERIODIC_LIST_SIZE*8 - interval) & ~7;
-  uint32_t uframe_min = (uframe_now + 9) & ~7;
-  uint32_t uframe_cur = uframe_min;
-  if (pending) {
-    itd_transfer *p = pending;
-    while (p->next) p = p->next;
-    uint32_t f = p->frame;
-    if (f < uframe_now) {
-      f += PERIODIC_LIST_SIZE*8;
-    }
-    if (f < uframe_max) {
-      f += interval > 8 ? interval : 8;
-      if (f > uframe_cur) uframe_cur = f;
-    }
+  uint32_t frame_max = (uframe_now + PERIODIC_LIST_SIZE*8) >> 3;
+  uint32_t frame_min = (uframe_now + 9) >> 3;
+  uint32_t frame_cur;
+  for (frame_cur = frame_min; frame_cur < frame_max; frame_cur++) {
+    if (frames[frame_cur % PERIODIC_LIST_SIZE] == false)
+      break;
   }
-  t->frame = (uframe_cur & (~interval + 1)) + offset;
-  if (t->frame < uframe_cur)
-    t->frame += interval;
 
-//  dprintf("ISO transfer<%p>: uframe_now %lu:%lu, scheduled %lu:%lu, uframe_min %lu:%lu, uframe_max %lu:%lu\n", t, uframe_now>>3, uframe_now&7, (t->frame>>3)&31, t->frame&7, uframe_min>>3, uframe_min&7, uframe_max>>3, uframe_max&7);
+  // round down to nearest interval and apply offset
+  t->frame = ((frame_cur*8 & (~interval + 1)) + offset) >> 3;
+  // may need correction applied depending on offset amount
+  if (t->frame < frame_cur)
+    t->frame = (t->frame*8 + interval) >> 3;
+
+//  dprintf("ISO transfer<%p>: uframe_now %lu:%lu, scheduled %lu, frame_min %lu, frame_max %lu\n", t, uframe_now>>3, uframe_now&7, t->frame%PERIODIC_LIST_SIZE, frame_min, frame_max);
 
   // did we find a suitable time-slot?
-  if (uframe_min <= t->frame && t->frame < uframe_max) {
-    t->frame = t->frame % (PERIODIC_LIST_SIZE*8);
+  if (frame_min <= t->frame && t->frame < frame_max && frames[t->frame % PERIODIC_LIST_SIZE]==false) {
+    t->frame = t->frame % PERIODIC_LIST_SIZE;
 
-    if (add_node(t->frame>>3, t->link_to(), 0xFFFFFFFF)) {
+    if (add_node(t->frame, t->link_to(), 0xFFFFFFFF)) {
       itd_transfer** p = &pending;
       while (*p) p = &(*p)->next;
       *p = t;
+      frames[t->frame] = true;
       return 0;
     }
     errno = ENOBUFS;
   }
   else errno = EBUSY;
-  dprintf("Failed to add node: uframe_now %lu:%lu, scheduled %lu:%lu, uframe_min %lu:%lu, uframe_max %lu:%lu, uframe_cur %lu:%lu\n", uframe_now>>3, uframe_now&7, t->frame>>3, t->frame&7, uframe_min>>3, uframe_min&7, uframe_max>>3, uframe_max&7, uframe_cur>>3, uframe_cur&7);
+  dprintf("Failed to add node: uframe_now %lu:%lu, scheduled %lu, frame_min %lu, frame_max %lu, frame_cur %lu\n", uframe_now>>3, uframe_now&7, t->frame, frame_min, frame_max, frame_cur);
   if (pending) {
     dprintf("PENDING:");
     itd_transfer *p = pending;
     while (p) {
-      dprintf(" %lu:%lu", p->frame>>3, p->frame&7);
+      dprintf(" %lu", p->frame);
       p = p->next;
     }
     dprintf("\n");
@@ -341,7 +338,8 @@ void USB_ISO_High_Endpoint::update(void) {
     }
 
     pending = t->next;
-    remove_node(t->frame>>3, t->link_to(), t->horizontal_link);
+    remove_node(t->frame, t->link_to(), t->horizontal_link);
+    frames[t->frame] = false;
 
     unsigned int tmask = t->s_mask;
     while (tmask) {
@@ -363,7 +361,8 @@ bool USB_ISO_High_Endpoint::set_inactive(void) {
   while (pending) {
     itd_transfer *t = pending;
     pending = t->next;
-    removed |= remove_node(t->frame>>3, t->link_to(), t->horizontal_link);
+    removed |= remove_node(t->frame, t->link_to(), t->horizontal_link);
+    frames[t->frame] = false;
 
 
     int remaining = __builtin_popcount(t->s_mask);
@@ -381,7 +380,8 @@ dir_in(_endpoint & 0x80),
 mult(((_wMaxPacketSize + 2048) >> 11) & 3),
 wMaxPacketSize(((_wMaxPacketSize & 0x7FF) < 1024) ? (_wMaxPacketSize & 0x7FF) : 1024),
 address(_address),
-endpoint(_endpoint & 0x7F) {
+endpoint(_endpoint & 0x7F),
+frames{0} {
   dprintf("New USB_ISO_High_Endpoint: %p\n", this);
   if (i > 16) i = 16;
   i = 1 << (i - 1);
@@ -437,7 +437,7 @@ int USB_ISO_High_Endpoint::IsochronousTransfer(isolength& Lengths, void* buffer,
       if (mask == 0) {
         // new iTD, initialize it
         ++p;
-        memset(p, 0, sizeof(*p));
+        memset(p, 0, sizeof(usb_iTD_t));
         p->horizontal_link = 1;
         p->address = address;
         p->endpt = endpoint;
@@ -454,7 +454,9 @@ int USB_ISO_High_Endpoint::IsochronousTransfer(isolength& Lengths, void* buffer,
         p->page6 = (b + 0x6000) >> 12;
         b &= 0xFFF;
 
+        p->next = NULL;
         p->cb = ig;
+        p->s_mask = 0;
 
         mask = s_mask;
       }
