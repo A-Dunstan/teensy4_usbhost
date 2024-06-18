@@ -321,7 +321,7 @@ static void serve_continue(EthernetClient &client) {
   }
 
   _gettimeofday(&tv, NULL);
-  snprintf(cheader, sizeof(cheader), "Content-Length %u\r\nX-Timestamp: %lld.%06ld\r\n\r\n", jpg_len, tv.tv_sec, tv.tv_usec);
+  snprintf(cheader, sizeof(cheader), "Content-Length %d\r\nX-Timestamp: %lld.%06ld\r\n\r\n", jpg_len, tv.tv_sec, tv.tv_usec);
   client.writeFully("--" CHUNK_BOUNDARY "\r\nContent-Type: image/jpeg\r\n");
   client.writeFully(cheader);
   client.writeFully(jpg_buf, jpg_len);
@@ -330,7 +330,6 @@ static void serve_continue(EthernetClient &client) {
 }
 
 void loop() {
-  static bool init_done = false;
   static EthernetClient client;
 
   if (!client) {
@@ -339,13 +338,9 @@ void loop() {
   }
 
   if (camera) {
-    if (!init_done) {
-      init_done = true;
-    }
     if (client) serve_continue(client);
   } else {
     if (client) client.close();
-    init_done = false;
   }
 }
 
