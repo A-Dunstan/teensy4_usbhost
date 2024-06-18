@@ -83,7 +83,7 @@ void USBMouse::poll(int result) {
       if (result > 8) result = 8;
       memcpy(&event, report, result);
       event.len = (uint8_t)result;
-      atomQueuePut(queue, -1, (uint8_t*)&event);
+      atomQueuePut(queue, -1, &event);
     }
     if (attached) InterruptMessage(ep_in, report_len, report, &poll_cb);
   }

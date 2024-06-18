@@ -44,7 +44,7 @@ uint32_t USBHostBase::getMillis(void) {
 }
 
 bool USBHostBase::getMessage(usb_msg_t &msg) {
-  uint8_t s = atomQueueGet(&usbqueue, 0, (uint8_t *)&msg);
+  uint8_t s = atomQueueGet(&usbqueue, 0, &msg);
   if (s != ATOM_OK)
     digitalWriteFast(LED_BUILTIN, HIGH);
   // release used timers now
@@ -54,7 +54,7 @@ bool USBHostBase::getMessage(usb_msg_t &msg) {
 }
 
 bool USBHostBase::putMessage(usb_msg_t &msg) {
-  if (atomQueuePut(&usbqueue, -1, (uint8_t *)&msg) != ATOM_OK) {
+  if (atomQueuePut(&usbqueue, -1, &msg) != ATOM_OK) {
     digitalWriteFast(LED_BUILTIN, HIGH);
     return false;
   }
@@ -75,7 +75,7 @@ bool USBHostBase::timerMsg(usb_msg_t &msg, uint32_t ms) {
 
 void USBHostBase::TimerMsg::timer_callback(POINTER cb_data) {
   TimerMsg *p = (TimerMsg *)cb_data;
-  if (atomQueuePut(&p->host.usbqueue, -1, (uint8_t *)&p->msg) == ATOM_WOULDBLOCK) {
+  if (atomQueuePut(&p->host.usbqueue, -1, &p->msg) == ATOM_WOULDBLOCK) {
     // queue is full, reschedule to try again
     p->cb_ticks = 1;
     if (atomTimerRegister(p) == ATOM_OK)
@@ -200,7 +200,7 @@ void TeensyUSB<irq,phy,ehci,pll>::usb_isr(void) {
   usb_msg_t intmsg = { USB_MSG_INTERRUPT };
   NVIC_DISABLE_IRQ(irq);
   atomIntEnter();
-  if (atomQueuePut(&g_usbqueue, -1, (uint8_t*)&intmsg) != ATOM_OK)
+  if (atomQueuePut(&g_usbqueue, -1, &intmsg) != ATOM_OK)
     digitalWriteFast(LED_BUILTIN, HIGH);
   atomIntExit(0);
 }
@@ -208,7 +208,7 @@ void TeensyUSB<irq,phy,ehci,pll>::usb_isr(void) {
 template <IRQ_NUMBER_t irq, uint32_t phy, uint32_t ehci, uint32_t pll>
 void TeensyUSB<irq,phy,ehci,pll>::thread(void) {
   usb_msg_t msgs[50];
-  atomQueueCreate(&g_usbqueue, (uint8_t *)msgs, sizeof(msgs[0]), sizeof(msgs) / sizeof(msgs[0]));
+  atomQueueCreate(&g_usbqueue, msgs, sizeof(msgs[0]), sizeof(msgs) / sizeof(msgs[0]));
 
   attachInterruptVector(irq, usb_isr);
   init_pll((struct REG32_QUAD_t*)pll);

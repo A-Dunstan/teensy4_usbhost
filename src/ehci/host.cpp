@@ -381,14 +381,13 @@ void USB_Host::unschedule_periodic(void) {
 
   for (uint32_t i=ep->offset >> 3; i < PERIODIC_LIST_SIZE; i += f_interval) {
     for (uint8_t j=0; j < 8; j++) {
-      // assumes s_mask and c_mask don't overlap
       if (s_mask & (1<<j)) {
         uframe_bandwidth[i*8+j] -= stime;
-        dprintf("bandwidth[%u:%u] = %u\n", i, j, uframe_bandwidth[i*8+j]);
+//        dprintf("bandwidth[%u:%u] = %u\n", i, j, uframe_bandwidth[i*8+j]);
       }
       if (c_mask & (1<<j)) {
         uframe_bandwidth[i*8+j] -= ctime;
-        dprintf("bandwidth[%u:%u] = %u\n", i, j, uframe_bandwidth[i*8+j]);
+//        dprintf("bandwidth[%u:%u] = %u\n", i, j, uframe_bandwidth[i*8+j]);
       }
     }
   }
@@ -489,11 +488,11 @@ void USB_Host::add_periodic_queue(USB_Periodic_Endpoint *ep) {
       uint32_t mask = 1<<j;
       if (mask & s_mask) {
         uframe_bandwidth[i*8+j] += stime;
-        dprintf("Updated frame %lu/%lu bandwidth for stime %u: %u\n", i, j, stime, uframe_bandwidth[i*8+j]);
+//        dprintf("Updated frame %lu/%lu bandwidth for stime %u: %u\n", i, j, stime, uframe_bandwidth[i*8+j]);
       }
       if (mask & c_mask) {
         uframe_bandwidth[i*8+j] += ctime;
-        dprintf("Updated frame %lu/%lu bandwidth for ctime %u: %u\n", i, j, ctime, uframe_bandwidth[i*8+j]);
+//        dprintf("Updated frame %lu/%lu bandwidth for ctime %u: %u\n", i, j, ctime, uframe_bandwidth[i*8+j]);
       }
     }
   }

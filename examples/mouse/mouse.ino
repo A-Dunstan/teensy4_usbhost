@@ -28,7 +28,7 @@ void loop() {
     digitalWriteFast(LED_BUILTIN, HIGH);
     mouse_event ev;
     // wait (10 systicks) for an event
-    if (atomQueueGet(&mouse_queue, 10, (uint8_t*)&ev) == ATOM_OK) {
+    if (atomQueueGet(&mouse_queue, 10, &ev) == ATOM_OK) {
       Serial.print("Mouse Event(");
       Serial.print(ev.len);
       Serial.print("): Buttons ");
