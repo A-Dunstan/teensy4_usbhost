@@ -15,13 +15,12 @@
 #include <time.h>
 #include <QNEthernet.h>
 #include <teensy4_usbhost.h>
-#include <TeensyAtomThreads.h>
 
 using namespace qindesign::network;
 
 static DMAMEM TeensyUSBHost2 usb;
 
-#define QUEUE_LENGTH 4
+#define QUEUE_LENGTH 3
 #define JPEGBUF_MAX (640*480*2)
 
 typedef struct {
@@ -55,15 +54,19 @@ class USB_Cam : public USB_Driver, public USB_Driver::Factory {
 
   bool offer(const usb_device_descriptor *d, const usb_configuration_descriptor*) override {
     if (getDevice() != NULL) return false; // already attached to a device
-    return (d->idVendor == 0x057E && d->idProduct == 0x030A);
+    if (d->idVendor == 0x057E && d->idProduct == 0x030A) return true;
+    return false;
   }
-  USB_Driver *attach(const usb_device_descriptor*, const usb_configuration_descriptor*, USB_Device *dev) override {
+  USB_Driver *attach(const usb_device_descriptor* d, const usb_configuration_descriptor*, USB_Device *dev) override {
     setDevice(dev);
 
     iface_streaming = 1;
     ep_in = 0x81;
     alt_setting = 6;
-    wMaxPacketSize = 3 * 0x3FC;
+    /* manufacturer string in the device descriptor for this webcam is different between full/high speed,
+     * makes it easy to differentiate without actually parsing the endpoint descriptor
+     */
+    wMaxPacketSize = (d->iManufacturer == 48 ? 3 : 1) * 0x3FC;
     sample_buf = (uint8_t*)aligned_alloc(32, wMaxPacketSize*8*QUEUE_LENGTH);
 
     // activate alt streaming interface
@@ -194,6 +197,8 @@ void setup() {
   Serial.begin(115200);
   while (!Serial);
 
+  if (CrashReport) Serial.print(CrashReport);
+
   usb.begin();
 
   Ethernet.onAddressChanged([]() {
@@ -316,6 +321,7 @@ static void serve_continue(EthernetClient &client) {
 
   jpg_buf = camera.getBuffer(jpg_len);
   if (jpg_buf == NULL || jpg_len <= 0) {
+    printf("Request timed out, closing connection\n");
     client.close();
     return;
   }
