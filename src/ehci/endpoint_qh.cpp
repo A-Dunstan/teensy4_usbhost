@@ -270,7 +270,7 @@ void QH_Base::flush(void) {
   while (t != dummy) {
     cache_invalidate(t);
     usb_transfer *next = static_cast<usb_transfer*>(t->next);
-    dprintf("FLUSH: %p %08X\n", static_cast<usb_qTD_t*>(t), t->token.val);
+    dprintf("FLUSH: %p %08lX\n", static_cast<usb_qTD_t*>(t), t->token.val);
     delete t;
     t = next;
   }

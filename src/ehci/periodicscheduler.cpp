@@ -67,7 +67,7 @@ bool PeriodicScheduler::add_node(uint32_t frame, uint32_t link_to, uint32_t inte
     *hlink = next;
     cache_flush_invalidate(hlink);
   } else if (next != hnext) {
-    dprintf("ERROR: node %p links to %08X instead of %08X! (frame %u)", h, next, hnext, frame);
+    dprintf("ERROR: node %p links to %08lX instead of %08lX! (frame %lu)", h, next, hnext, frame);
   }
   cache_invalidate(h);
   *h = link_to;

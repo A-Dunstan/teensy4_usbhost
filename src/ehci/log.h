@@ -20,10 +20,10 @@
 #define _USB_LOG_H
 
 #include <cstdio>
-#include <pgmspace.h>
+#include "config.h"
 
-#if 1
-#define dprintf(fmt, ...) ::printf(PSTR(fmt) __VA_OPT__(,) __VA_ARGS__)
+#if LOGGING
+#define dprintf(fmt, ...) ::printf(fmt __VA_OPT__(,) __VA_ARGS__)
 #else
 #define dprintf(...)
 #endif

@@ -25,4 +25,6 @@
 // language used for descriptor strings - nearly all devices only support US language
 #define USB_LANG 0x0409
 
+#define LOGGING 1
+
 #endif // _USB_CONFIG_H

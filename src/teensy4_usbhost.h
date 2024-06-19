@@ -30,6 +30,7 @@
 #include "ehci/host.h"
 #include "ehci/driver.h"
 #include <imxrt.h>
+#include <pgmspace.h>
 
 #define USB_STACK_SIZE 1024
 

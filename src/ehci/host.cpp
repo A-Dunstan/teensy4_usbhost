@@ -383,11 +383,11 @@ void USB_Host::unschedule_periodic(void) {
     for (uint8_t j=0; j < 8; j++) {
       if (s_mask & (1<<j)) {
         uframe_bandwidth[i*8+j] -= stime;
-        dprintf("bandwidth[%u:%u] = %u\n", i, j, uframe_bandwidth[i*8+j]);
+        dprintf("bandwidth[%lu:%u] = %u\n", i, j, uframe_bandwidth[i*8+j]);
       }
       if (c_mask & (1<<j)) {
         uframe_bandwidth[i*8+j] -= ctime;
-        dprintf("bandwidth[%u:%u] = %u\n", i, j, uframe_bandwidth[i*8+j]);
+        dprintf("bandwidth[%lu:%u] = %u\n", i, j, uframe_bandwidth[i*8+j]);
       }
     }
   }
@@ -453,7 +453,7 @@ bool USB_Host::calculate_offset(const USB_Periodic_Endpoint *ep, uint32_t &offse
   }
   // fail if the best found needs more than 80% (234 * 0.8) in any uframe
   if (best_bandwidth > 187) {
-    dprintf("calculate_bandwidth for endpoint %p failed: best_bandwidth %u, offset %u, interval %u\n", ep, best_bandwidth, offset, ep->interval);
+    dprintf("calculate_bandwidth for endpoint %p failed: best_bandwidth %lu, offset %lu, interval %lu\n", ep, best_bandwidth, offset, ep->interval);
     return false;
   }
   return true;
@@ -476,7 +476,7 @@ void USB_Host::add_periodic_queue(USB_Periodic_Endpoint *ep) {
   uint8_t ctime = ep->ctime;
   uint8_t s_mask, c_mask;
   ep->get_masks(s_mask, c_mask);
-  dprintf("Endpoint<%p> interval %lu offset %lu stime %lu ctime %lu s_mask %02X c_mask %02X\n", ep, interval, offset, stime, ctime, s_mask, c_mask);
+  dprintf("Endpoint<%p> interval %lu offset %lu stime %u ctime %u s_mask %02X c_mask %02X\n", ep, interval, offset, stime, ctime, s_mask, c_mask);
 
   /* use the interval and offset to insert the endpoint into the periodic schedule,
     * and s_mask+c_mask to update uframe_bandwidth
@@ -580,7 +580,7 @@ void USB_Host::usb_process(void) {
   EHCI->PERIODICLISTBASE = periodictable;
   EHCI->FRINDEX = 0;
   EHCI->ASYNCLISTADDR = (uint32_t)static_cast<usb_queue_head_t*>(&Enum);
-  dprintf("Enumeration QH: %08X\n", EHCI->ASYNCLISTADDR);
+  dprintf("Enumeration QH: %08lX\n", EHCI->ASYNCLISTADDR);
   uint32_t usbcmdinit = 0;
 #if (PERIODIC_LIST_SIZE >= 8 && PERIODIC_LIST_SIZE < 128)
     usbcmdinit |= USB_USBCMD_FS_2 | USB_USBCMD_FS_1((64 - PERIODIC_LIST_SIZE) / 17);
