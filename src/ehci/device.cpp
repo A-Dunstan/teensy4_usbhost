@@ -22,6 +22,7 @@
 #include <cstring>
 #include <locale>
 #include <codecvt>
+#include <memory>
 
 #define MK_BE16(a, b) (((a)<<8)|(b))
 
@@ -82,18 +83,18 @@ class dev_config {
   /* Holds the data returned by USB_REQ_GETDESCRIPTOR for this configuration.
    * Interfaces and endpoints all return pointers into this memory.
    */
-  uint8_t* const raw;
+  std::unique_ptr<uint8_t[]> raw;
   const size_t length;
   // array of interfaces, which is also an array of altSettings
   std::vector<dev_interface> interfaces;
 
 public:
   dev_config(const usb_configuration_descriptor *desc, size_t len) :
-  raw(new(std::nothrow) uint8_t[len]),
   length(len) {
-    memcpy(raw, desc, len);
-    const uint8_t *d = raw + sizeof(usb_configuration_descriptor);
-    const uint8_t *end = raw + len;
+    std::unique_ptr<uint8_t[]> r = std::make_unique<uint8_t[]>(len);
+    memcpy(&r[0], desc, len);
+    const uint8_t *d = &r[sizeof(usb_configuration_descriptor)];
+    const uint8_t *end = &r[len-1]+1;
 
     const uint8_t *interface = NULL;
     while (d < end-4) {
@@ -119,12 +120,10 @@ public:
         interfaces.back().add_alternate(interface, end);
       }
     }
-  }
-  ~dev_config() {
-    delete[] raw;
+    raw = std::move(r);
   }
 
-  const usb_configuration_descriptor* getConfiguration(void) const { return (const usb_configuration_descriptor*)raw; }
+  const usb_configuration_descriptor* getConfiguration(void) const { return (const usb_configuration_descriptor*)&raw[0]; }
   const usb_configuration_descriptor* getConfiguration(size_t &l) const {l = length; return getConfiguration(); }
   dev_interface* interface(uint8_t index) {
     if (index < interfaces.size()) {
