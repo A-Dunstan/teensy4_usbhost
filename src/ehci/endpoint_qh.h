@@ -21,6 +21,7 @@
 
 #include "endpoint.h"
 #include "portab.h"
+#include <memory>
 
 class usb_transfer;
 
@@ -72,7 +73,7 @@ typedef struct __attribute__((aligned(64))) usb_queue_head_t {
 class QH_Base : public usb_queue_head_t {
 private:
   usb_transfer* pending;
-  usb_transfer* dummy;
+  std::unique_ptr<usb_transfer> dummy;
   bool active;
 
 protected:

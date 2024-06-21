@@ -195,7 +195,7 @@ void cache_invalidate(usb_transfer* p) {
 }
 
 void QH_Base::update(void) {
-  while (pending != dummy) {
+  while (pending != dummy.get()) {
     int ret = 0;
     usb_transfer* t = pending;
     cache_invalidate(t);
@@ -253,7 +253,7 @@ void QH_Base::update(void) {
     }
 
     delete t;
-//    dprintf("next: %p(%p)\n", pending, dummy);
+//    dprintf("next: %p(%p)\n", pending, dummy.get());
   }
 }
 
@@ -262,12 +262,12 @@ void QH_Base::flush(void) {
   dprintf("Endpoint %p flush\n", this);
   cache_invalidate(this);
   overlay.alt = QTD_PTR_INVALID;
-  overlay.next = dummy;
+  overlay.next = dummy.get();
   overlay.token.val = 0; // reset dt to zero
   cache_flush_invalidate(this);
 
   usb_transfer *t = pending;
-  while (t != dummy) {
+  while (t != dummy.get()) {
     cache_invalidate(t);
     usb_transfer *next = static_cast<usb_transfer*>(t->next);
     dprintf("FLUSH: %p %08lX\n", static_cast<usb_qTD_t*>(t), t->token.val);
@@ -282,19 +282,19 @@ bool QH_Base::enqueue_transfer(usb_transfer* head) {
     errno = ENODEV;
     return false;
   }
-//  dprintf("Enqueue transfer<%p>: %p(%p), dummy: %p\n", this, static_cast<usb_qTD_t*>(head), head->qtd_page[0], static_cast<usb_qTD_t*>(dummy));
+//  dprintf("Enqueue transfer<%p>: %p(%p), dummy: %p\n", this, static_cast<usb_qTD_t*>(head), head->qtd_page[0], static_cast<usb_qTD_t*>(dummy.get()));
 
   head->sync_chain();
 
-  usb_transfer* p = dummy;    // local copy of dummy ptr
-  head->token.status = 0x40;  // set inactive+halted
-  *p = *head;                 // copy over dummy (becomes new head)
-  cache_flush(p);             // ensure new qTD data is updated _before_ activating
+  usb_transfer* p = dummy.release(); // copy dummy ptr
+  dummy.reset(head);                 // head becomes new dummy
+  head->token.status = 0x40;         // set inactive+halted
+  *p = *head;                        // copy over dummy (becomes new head)
+  cache_flush(p);                    // ensure new qTD data is updated _before_ activating
   cache_flush(head);
-  cache_sync();               // ensure cache flush has completed
-  p->token.status = 0x80;     // set old dummy/new head active
-  cache_flush(p);             // flush (triggers overlay if QH is idle)
-  dummy = head;               // old head is now dummy
+  cache_sync();                      // ensure cache flush has completed
+  p->token.status = 0x80;            // set old dummy/new head active
+  cache_flush(p);                    // flush (triggers overlay if QH is idle)
 
 #if 0
   cache_invalidate(this);
@@ -303,7 +303,7 @@ bool QH_Base::enqueue_transfer(usb_transfer* head) {
   while (1) {
     cache_invalidate(h);
     dprintf(" -> %p (%08lX %s %u)", static_cast<usb_qTD_t*>(h), h->token.val, h->token.val & 0x40 ? "HALT" : (h->token.PID==2 ? "SETUP" : (h->token.PID==1 ? "IN" : "OUT")), h->token.total);
-    if (h == dummy) break;
+    if (h == dummy.get()) break;
     h = static_cast<usb_transfer*>(h->next);
   }
   dprintf("\n");
@@ -330,10 +330,10 @@ int QH_Base::BulkIntrTransfer(bool dir_in, uint32_t Length, void *buffer, const 
 }
 
 QH_Base::QH_Base(uint8_t endpoint, uint16_t max_packet_size, uint8_t hub, uint8_t port, uint8_t address, uint8_t speed) {
-  dummy = new(std::nothrow) usb_transfer;
+  dummy = std::make_unique<usb_transfer>();
   dummy->token.status = 0x40; // halt
-  cache_flush(dummy);
-  pending = dummy;
+  pending = dummy.get();
+  cache_flush(pending);
 
   memset(static_cast<usb_queue_head_t*>(this), 0, sizeof(usb_queue_head_t));
   // initialize generic queue head
@@ -358,7 +358,7 @@ QH_Base::QH_Base(uint8_t endpoint, uint16_t max_packet_size, uint8_t hub, uint8_
   }
 
   overlay.alt = QTD_PTR_INVALID;
-  overlay.next = dummy;
+  overlay.next = pending;
 
   active = true;
 }
@@ -367,15 +367,13 @@ QH_Base::~QH_Base() {
   // this endpoint has been removed from the async or periodic schedule and won't process any more transfers
   active = false;
   usb_transfer *t = pending;
-  while (t != dummy) {
+  while (t != dummy.get()) {
     usb_transfer *next = static_cast<usb_transfer*>(t->next);
     if (t->cb)
       t->cb->callback(t, -ENODEV);
     delete t;
     t = next;
   }
-  // release dummy too
-  delete t;
 }
 
 void USB_Async_Endpoint::set_link(const USB_Async_Endpoint* p) {
