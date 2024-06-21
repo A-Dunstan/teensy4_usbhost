@@ -158,17 +158,19 @@ void USB_ISO_Endpoint<Transfer>::new_offset(void) {
 
 template <class Transfer>
 bool USB_ISO_Endpoint<Transfer>::set_inactive(void) {
-  bool removed = false;
-  while (pending) {
-    Transfer *t = pending;
-    pending = t->next;
-    removed |= remove_node(t->frame, t->link_to(), t->horizontal_link);
-    frames[t->frame] = false;
-
-    t->inactivate();
+  Transfer **p = &pending;
+  while (*p) {
+    Transfer *t = *p;
+    if (remove_node(t->frame, t->link_to(), t->horizontal_link)) {
+      frames[t->frame] = false;
+      *p = t->next;
+      t->inactivate();
+    } else {
+      p = &t->next;
+    }
   }
 
-  return removed;
+  return pending != NULL;
 }
 
 USB_ISO_Full_Endpoint::USB_ISO_Full_Endpoint(uint8_t endpoint, uint16_t max_packet_size, uint8_t address, uint8_t hub_addr, uint8_t port, uint32_t i, PeriodicScheduler& scheduler) :
