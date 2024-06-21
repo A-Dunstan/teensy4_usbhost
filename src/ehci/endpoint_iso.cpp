@@ -278,7 +278,6 @@ USB_ISO_Endpoint(_endpoint & 0x80, (_wMaxPacketSize & 0x400) ? 1024 : (_wMaxPack
 mult(((_wMaxPacketSize + 2048) >> 11) & 3),
 address(_address),
 endpoint(_endpoint & 0x7F) {
-  dprintf("New USB_ISO_High_Endpoint: %p\n", this);
   if (i > 16) i = 16;
   i = 1 << (i - 1);
 

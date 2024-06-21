@@ -365,7 +365,6 @@ QH_Base::QH_Base(uint8_t endpoint, uint16_t max_packet_size, uint8_t hub, uint8_
 
 QH_Base::~QH_Base() {
   // this endpoint has been removed from the async or periodic schedule and won't process any more transfers
-  dprintf("Endpoint %p cleanup\n", this);
   active = false;
   usb_transfer *t = pending;
   while (t != dummy) {

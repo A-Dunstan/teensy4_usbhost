@@ -19,6 +19,7 @@
 #ifndef _USB_ENDPOINT_H
 #define _USB_ENDPOINT_H
 
+#include "log.h"
 #include "periodicscheduler.h"
 #include "types.h"
 #include <cstdint>
@@ -27,7 +28,9 @@
 class USB_Endpoint {
 protected:
   USB_Endpoint(uint8_t _ep_type) :
-  ep_type(_ep_type) {}
+  ep_type(_ep_type) {
+    dprintf("New Endpoint<%p> type %u\n", this, ep_type);
+  }
 public:
   class USB_Endpoint* host_next = NULL;
   class USB_Device* device = NULL;
@@ -46,7 +49,9 @@ public:
     return -EOPNOTSUPP;
   }
 
-  virtual ~USB_Endpoint() = default;
+  virtual ~USB_Endpoint() {
+    dprintf("Endpoint<%p>:%u destroyed\n", this, ep_type);
+  }
 };
 
 class USB_Periodic_Endpoint : public USB_Endpoint {
