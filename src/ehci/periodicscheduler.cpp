@@ -23,17 +23,11 @@
 #include <cstdlib>
 
 PeriodicScheduler::PeriodicScheduler(volatile uint32_t& frindex) :
-FRINDEX(frindex) {
-  periodictable = (uint32_t*)aligned_alloc(4096, sizeof(uint32_t)*PERIODIC_LIST_SIZE);
-
-  dprintf("PERIODIC_LIST_SIZE: %d (%p)\n", PERIODIC_LIST_SIZE, periodictable);
+FRINDEX(frindex),
+periodictable(new(std::align_val_t(4096)) uint32_t[PERIODIC_LIST_SIZE]) {
   for (int i=0; i < PERIODIC_LIST_SIZE; i++)
     periodictable[i] = 0x80000001;
-  cache_flush(periodictable, sizeof(periodictable[0])*PERIODIC_LIST_SIZE, 4096);
-}
-
-PeriodicScheduler::~PeriodicScheduler() {
-  free(periodictable);
+  cache_flush(&periodictable[0], sizeof(periodictable[0])*PERIODIC_LIST_SIZE, 4096);
 }
 
 uint32_t PeriodicScheduler::current_uframe(void) {
@@ -42,7 +36,7 @@ uint32_t PeriodicScheduler::current_uframe(void) {
 
 bool PeriodicScheduler::add_node(uint32_t frame, uint32_t link_to, uint32_t interval) {
   uint32_t *hlink = (uint32_t*)(link_to & ~0x1F);
-  uint32_t *h = periodictable+frame;
+  uint32_t *h = &periodictable[frame];
   uint32_t hnext = *hlink;
   uint32_t next;
   while (next = *h, (next & 1)==0) {
@@ -76,7 +70,7 @@ bool PeriodicScheduler::add_node(uint32_t frame, uint32_t link_to, uint32_t inte
 }
 
 bool PeriodicScheduler::remove_node(uint32_t frame, uint32_t link_to, uint32_t hnext) {
-  uint32_t *h = periodictable+frame;
+  uint32_t *h = &periodictable[frame];
   uint32_t next;
   while (next = *h, (next & 1)==0) {
     if (next == hnext) {

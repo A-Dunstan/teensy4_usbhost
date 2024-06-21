@@ -20,14 +20,14 @@
 #define _USB_PERIODICSCHEDULER_H
 
 #include <cstdint>
+#include <memory>
 
 class PeriodicScheduler {
 private:
   volatile uint32_t& FRINDEX;
 protected:
-  uint32_t* periodictable;
+  std::unique_ptr<uint32_t[]> periodictable;
   PeriodicScheduler(volatile uint32_t&);
-  ~PeriodicScheduler();
 public:
   bool add_node(uint32_t frame, uint32_t link_to, uint32_t interval);
   bool remove_node(uint32_t frame, uint32_t link_to, uint32_t next);

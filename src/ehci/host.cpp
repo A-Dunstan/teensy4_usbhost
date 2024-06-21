@@ -577,7 +577,8 @@ void USB_Host::usb_process(void) {
   memset(uframe_bandwidth, 0, sizeof(uframe_bandwidth));
   EHCI->USBINTR = 0;
   setHostMode();
-  EHCI->PERIODICLISTBASE = periodictable;
+  dprintf("PERIODIC_LIST_SIZE: %d (%u bytes @ %p)\n", PERIODIC_LIST_SIZE, PERIODIC_LIST_SIZE*4, &periodictable[0]);
+  EHCI->PERIODICLISTBASE = &periodictable[0];
   EHCI->FRINDEX = 0;
   EHCI->ASYNCLISTADDR = (uint32_t)static_cast<usb_queue_head_t*>(&Enum);
   dprintf("Enumeration QH: %08lX\n", EHCI->ASYNCLISTADDR);
