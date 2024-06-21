@@ -21,60 +21,54 @@
 
 #include "endpoint.h"
 #include "config.h"
+#include "log.h"
 #include <bitset>
 
 struct sitd_transfer;
 struct itd_transfer;
 
-class USB_ISO_Full_Endpoint : public USB_Periodic_Endpoint {
-private:
+template <class Transfer>
+class USB_ISO_Endpoint : public USB_Periodic_Endpoint {
+protected:
   const bool dir_in;
-  uint16_t wMaxPacketSize;
-  uint32_t state;
-  uint8_t s_mask, c_mask;
+  const uint16_t wMaxPacketSize;
+  uint8_t s_mask = 0;
+  uint8_t c_mask = 0;
 
-  sitd_transfer* pending = NULL;
-  std::bitset<PERIODIC_LIST_SIZE> frames;
-  int Schedule(sitd_transfer*);
+  Transfer* pending = NULL;
+  std::bitset<PERIODIC_LIST_SIZE> frames{0};
+
+  int Schedule(Transfer*);
+
+  USB_ISO_Endpoint(bool _dir_in, uint16_t max_packet_size, PeriodicScheduler& scheduler) :
+  USB_Periodic_Endpoint(USB_ENDPOINT_ISOCHRONOUS, scheduler),
+  dir_in(_dir_in),
+  wMaxPacketSize(max_packet_size) {}
 
 public:
   void update(void) override;
-
   void new_offset(void) override;
   bool set_inactive(void) override;
-
-  USB_ISO_Full_Endpoint(uint8_t endpoint, uint16_t max_packet_size, uint8_t address, uint8_t hub_addr, uint8_t port, uint32_t interval, PeriodicScheduler&);
-  ~USB_ISO_Full_Endpoint() = default;
-
   void get_masks(uint8_t& smask, uint8_t& cmask) const override {smask = s_mask, cmask = c_mask;}
+};
 
+class USB_ISO_Full_Endpoint : public USB_ISO_Endpoint<sitd_transfer> {
+private:
+  uint32_t state;
+
+public:
+  USB_ISO_Full_Endpoint(uint8_t endpoint, uint16_t max_packet_size, uint8_t address, uint8_t hub_addr, uint8_t port, uint32_t interval, PeriodicScheduler&);
   int IsochronousTransfer(isolength& Lengths, void *buffer, const USBCallback* cb) override;
 };
 
-class USB_ISO_High_Endpoint : public USB_Periodic_Endpoint {
+class USB_ISO_High_Endpoint : public USB_ISO_Endpoint<itd_transfer> {
 private:
-  const bool dir_in;
   const uint32_t mult;
-  const uint32_t wMaxPacketSize;
   const uint8_t address;
   const uint8_t endpoint;
-  uint8_t s_mask;
-
-  itd_transfer* pending = NULL;
-  std::bitset<PERIODIC_LIST_SIZE> frames;
-  int Schedule(itd_transfer*);
 
 public:
-  void update(void) override;
-
-  void new_offset(void) override;
-  bool set_inactive(void) override;
-
   USB_ISO_High_Endpoint(uint8_t endpoint, uint16_t wMaxPacketSize, uint8_t address, uint32_t interval, PeriodicScheduler&);
-  ~USB_ISO_High_Endpoint() = default;
-
-  void get_masks(uint8_t& smask, uint8_t& cmask) const override {smask = s_mask, cmask = 0;}
-
   int IsochronousTransfer(isolength& Lengths, void *buffer, const USBCallback* cb) override;
 };
 
@@ -157,6 +151,14 @@ typedef struct sitd_transfer : usb_siTD_t {
   uint32_t frame;
   int16_t length;
   uint32_t link_to() const { return ((uint32_t)&horizontal_link)+4; }
+  void inactivate(void) { cb->callback(this, -ENODEV); }
+  void complete(void) { cb->callback(this, length - total); }
+  bool ready(void) {
+    if (status & 0x80) return false;
+    if (status & 0x7C)
+      dprintf("Possible ISO transfer error: %02X\n", status);
+    return true;
+  }
 } sitd_transfer;
 
 typedef struct itd_transfer : usb_iTD_t {
@@ -165,6 +167,30 @@ typedef struct itd_transfer : usb_iTD_t {
   uint32_t frame;
   uint8_t s_mask;
   uint32_t link_to() const { return (uint32_t)&horizontal_link; }
+  void inactivate(void) {
+    int remaining = __builtin_popcount(s_mask);
+    while (remaining-->0) {
+      cb->callback(this, -ENODEV);
+    }
+  }
+  void complete(void) {
+    unsigned int tmask = s_mask;
+    while (tmask) {
+      unsigned int pos = __builtin_ctz(tmask);
+      if (transfers[pos].status & 7)
+        dprintf("Possible ISO transfer error: %02X\n", transfers[pos].status);
+      cb->callback(this, transfers[pos].total);
+      tmask &= ~(1 << pos);
+    }
+  }
+  bool ready(void) {
+    // process complete iTD only
+    for (unsigned int i=8; i > 0; i--) {
+      if (transfers[i-1].status & 8)
+        return false;
+    }
+    return true;
+  }
 } itd_transfer;
 
 #endif // _USB_ENDOINT_ISO_H
