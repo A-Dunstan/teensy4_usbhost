@@ -311,8 +311,6 @@ static void serve_start(EthernetClient &client) {
   client.close();
 }
 
-extern "C" int _gettimeofday(struct timeval *tv, void*);
-
 static void serve_continue(EthernetClient &client) {
   struct timeval tv;
   char cheader[128];
@@ -326,7 +324,7 @@ static void serve_continue(EthernetClient &client) {
     return;
   }
 
-  _gettimeofday(&tv, NULL);
+  gettimeofday(&tv, NULL);
   snprintf(cheader, sizeof(cheader), "Content-Length %d\r\nX-Timestamp: %lld.%06ld\r\n\r\n", jpg_len, tv.tv_sec, tv.tv_usec);
   client.writeFully("--" CHUNK_BOUNDARY "\r\nContent-Type: image/jpeg\r\n");
   client.writeFully(cheader);

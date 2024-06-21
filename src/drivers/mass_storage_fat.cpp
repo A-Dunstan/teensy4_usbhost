@@ -17,9 +17,7 @@
 */
 
 #include "mass_storage_fat.h"
-#include <ctime>
-
-extern "C" int _gettimeofday(struct timeval*, void*);
+#include <sys/time.h>
 
 #define MAX_FILENAME_LEN 256
 
@@ -143,7 +141,7 @@ bool USB_FAT_Volume::writeSectors(uint32_t sector, const uint8_t *src, size_t ns
 
 void USB_FAT_Volume::TimeCB(uint16_t *date, uint16_t *time, uint8_t *ms10) {
   struct timeval tv;
-  if (_gettimeofday(&tv, NULL) == 0) {
+  if (gettimeofday(&tv, NULL) == 0) {
     DateTimeFields dt;
     breakTime(tv.tv_sec, dt);
     if (dt.year >= 80) {
