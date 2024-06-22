@@ -47,20 +47,22 @@ static void fill_qtd(usb_qTD_t& p, usb_qTD_t* next_qtd, usb_qTD_t* alt_qtd, bool
 
 typedef struct __attribute__((aligned(32))) : usb_qTD_t {} usb_qTD_aligned;
 
-static void cache_flush(const usb_transfer* p);
-static void cache_invalidate(usb_transfer* p);
+static void cache_flush(const usb_qTD_aligned*);
+static void cache_invalidate(usb_qTD_aligned*);
 
 class usb_transfer : public usb_qTD_aligned  {
-private:
-  void sync_chain(usb_qTD_t* end) {
-    if (next != end)
-      static_cast<usb_transfer*>(next)->sync_chain(end);
-    if (IS_QTD_PTR_VALID(alt) && alt != end)
-      static_cast<usb_transfer*>(alt)->sync_chain(end);
-    if (this != end)
-      cache_flush(this);
+  static void sync_chain(usb_qTD_aligned& src, usb_qTD_aligned& end) {
+    usb_qTD_aligned& next = static_cast<usb_qTD_aligned&>(*src.next);
+    if (&next != &end)
+      sync_chain(next, end);
+    if (IS_QTD_PTR_VALID(src.alt)) {
+      usb_qTD_aligned& alt = static_cast<usb_qTD_aligned&>(*src.alt);
+      if (&alt != &end)
+        sync_chain(alt, end);
+    }
+    if (&src != &end)
+      cache_flush(&src);
   }
-
 public:
   CCallback<class usb_transfer>* cb;
   class usb_transfer *error_handler;
@@ -71,7 +73,7 @@ public:
 
   virtual ~usb_transfer() = default;
 
-  void sync_chain(void) {sync_chain(this);}
+  void sync_chain(void) {sync_chain(*this,*this); }
 };
 
 class static_usb_transfer : public usb_transfer {
@@ -184,14 +186,12 @@ public:
   }
 };
 
-void cache_flush(const usb_transfer* p) {
-  const usb_qTD_aligned &qtd = *p;
-  cache_flush(&qtd, sizeof(qtd), alignof(qtd));
+void cache_flush(const usb_qTD_aligned* qtd) {
+  cache_flush(qtd, sizeof(*qtd), alignof(*qtd));
 }
 
-void cache_invalidate(usb_transfer* p) {
-  usb_qTD_aligned &qtd = *p;
-  cache_invalidate(&qtd, sizeof(qtd), alignof(qtd));
+void cache_invalidate(usb_qTD_aligned* qtd) {
+  cache_invalidate(qtd, sizeof(*qtd), alignof(*qtd));
 }
 
 void QH_Base::update(void) {

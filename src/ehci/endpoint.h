@@ -50,7 +50,7 @@ public:
   }
 
   virtual ~USB_Endpoint() {
-    dprintf("Endpoint<%p>:%u destroyed\n", this, ep_type);
+    dprintf("Endpoint<%p> type %u destroyed\n", this, ep_type);
   }
 };
 
