@@ -139,6 +139,17 @@ typedef struct {
   uint8_t bInterval;
 } __attribute__((packed)) usb_endpoint_descriptor;
 
+typedef struct {
+  uint8_t bLength;
+  uint8_t bDescriptorType;
+  uint8_t bFirstInterface;
+  uint8_t bInterfaceCount;
+  uint8_t bFunctionClass;
+  uint8_t bFunctionSubClass;
+  uint8_t bFunctionProtocol;
+  uint8_t iFunction;
+} usb_interface_association_descriptor;
+
 #define USB_PORT_FEATURE_CONNECTION     0
 #define USB_PORT_FEATURE_ENABLE         1
 #define USB_PORT_FEATURE_SUSPEND        2
