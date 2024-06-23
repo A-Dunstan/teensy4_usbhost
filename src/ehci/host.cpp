@@ -593,7 +593,7 @@ void USB_Host::usb_process(void) {
   dprintf("USBCMD (FS): %08lX\n", usbcmdinit);
   // ensure other registers are written before CMD is updated
   mem_sync();
-  EHCI->USBCMD = usbcmdinit | USB_USBCMD_ITC(0) | USB_USBCMD_RS | USB_USBCMD_ASP(3) | USB_USBCMD_ASPE | USB_USBCMD_PSE | USB_USBCMD_ASE;
+  EHCI->USBCMD = usbcmdinit | USB_USBCMD_ITC(1) | USB_USBCMD_RS | USB_USBCMD_ASP(3) | USB_USBCMD_ASPE | USB_USBCMD_PSE | USB_USBCMD_ASE;
 
   EHCI->CONFIGFLAG = 1;
   // turn on ports, set their stage to 1
