@@ -41,4 +41,21 @@ static void recurse_dir_print(String base, File &f, Print &p) {
   }
 }
 
+// check if a pointer holds a valid USB descriptor of the specified type
+template <class desc>
+const desc* get_desc_type(const void* p, uint8_t type, const uint8_t* end, size_t min_length = sizeof(desc)) {
+  const uint8_t *b = (const uint8_t*)p;
+  // no space left for descriptor
+  if (b >= end) return NULL;
+  // is this descriptor long enough for a match?
+  if (b[0] < min_length) return NULL;
+  min_length = b[0];
+  // is there enough room here for the entire descriptor?
+  if (b + min_length > end) return NULL;
+  // is this descriptor the wanted type?
+  if (b[1] != type) return NULL;
+
+  return (const desc*)b;
+}
+
 #endif // _USB_UTIL_H
