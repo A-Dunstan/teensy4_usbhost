@@ -366,33 +366,38 @@ bool USB_RNDIS::parse_config(const usb_configuration_descriptor* c, USB_RNDIS *p
 
   while (b < end) {
     auto iad = get_desc_type<usb_interface_association_descriptor>(b, USB_DT_INTERFACE_ASSOCIATION, end);
-    if (iad) {
+    if (iad && iad->bInterfaceCount==2) {
       // class: miscellaneous(239), subclass: 4(RNDIS), protocol: 1(RNDIS over Ethernet)
-      if ((iad->bInterfaceCount==2 && iad->bFunctionClass==239 && iad->bFunctionSubClass==4 && iad->bFunctionProtocol==1) ||
-          (iad->bInterfaceCount==2 && iad->bFunctionClass==224 && iad->bFunctionSubClass==1 && iad->bFunctionProtocol==3)) {
+      if ((iad->bFunctionClass==239 && iad->bFunctionSubClass==4 && iad->bFunctionProtocol==1) ||
+          (iad->bFunctionClass==224 && iad->bFunctionSubClass==1 && iad->bFunctionProtocol==3) ||
+          // class: CDC, subclass: Ethernet Network Control Model, protocol: None
+          (iad->bFunctionClass==2 && iad->bFunctionSubClass==6 && iad->bFunctionProtocol==0)) {
         const usb_interface_descriptor *control = NULL, *data = NULL;
         const uint8_t* bb = (const uint8_t*)(iad+1);
         for (int i=0; bb < end && i < iad->bInterfaceCount;) {
           auto iface = get_desc_type<usb_interface_descriptor>(bb, USB_DT_INTERFACE, end);
           if (iface && iface->bAlternateSetting==0) {
             ++i;
-            if (iface->bNumEndpoints>=1 && iface->bInterfaceClass==iad->bFunctionClass && iface->bInterfaceSubClass==iad->bFunctionSubClass && iface->bInterfaceProtocol==iad->bFunctionProtocol && control==NULL) {
-              // looks like a control interface... find an IN interrupt endpoint with wMaxPacketSize==8
-              const uint8_t* bbb = (const uint8_t*)(iface+1);
-              for (int j=0; bbb < end && j < iface->bNumEndpoints;) {
-                auto ep = get_desc_type<usb_endpoint_descriptor>(bbb, USB_DT_ENDPOINT, end);
-                if (ep) {
-                  ++j;
-                  if (ep->bEndpointAddress & 0x80 && (ep->bmAttributes&3)==USB_ENDPOINT_INTERRUPT && ep->wMaxPacketSize==8) {
-                    control = iface;
-                    if (p) {
-                      p->control_interface = iface->bInterfaceNumber;
-                      p->status_endpoint = ep->bEndpointAddress;
+            if (iface->bNumEndpoints>=1 && control == NULL) {
+              if ((iface->bInterfaceClass==iad->bFunctionClass && iface->bInterfaceSubClass==iad->bFunctionSubClass && iface->bInterfaceProtocol==iad->bFunctionProtocol) ||
+                  (iface->bInterfaceClass==224 && iface->bInterfaceSubClass==1 && iface->bInterfaceProtocol==3)) {
+                // looks like a control interface... find an IN interrupt endpoint with wMaxPacketSize==8
+                const uint8_t* bbb = (const uint8_t*)(iface+1);
+                for (int j=0; bbb < end && j < iface->bNumEndpoints;) {
+                  auto ep = get_desc_type<usb_endpoint_descriptor>(bbb, USB_DT_ENDPOINT, end);
+                  if (ep) {
+                    ++j;
+                    if (ep->bEndpointAddress & 0x80 && (ep->bmAttributes&3)==USB_ENDPOINT_INTERRUPT && ep->wMaxPacketSize==8) {
+                      control = iface;
+                      if (p) {
+                        p->control_interface = iface->bInterfaceNumber;
+                        p->status_endpoint = ep->bEndpointAddress;
+                      }
+                      break;
                     }
-                    break;
                   }
+                  bbb += bbb[0];
                 }
-                bbb += bbb[0];
               }
             }
             // data interface uses CDC data interface class
