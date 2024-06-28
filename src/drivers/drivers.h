@@ -31,3 +31,7 @@
 #ifdef USE_MOUSE
 #include "mouse.h"
 #endif
+
+#ifdef USE_RNDIS
+#include "rndis.h"
+#endif
