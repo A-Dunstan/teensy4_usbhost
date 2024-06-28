@@ -193,24 +193,51 @@ uint32_t USB_RNDIS::rndis_query(uint32_t OID, void* queryOut, uint32_t lengthOut
 }
 
 void USB_RNDIS::init_oids(void) {
-  if (rndis_query(OID_802_3_CURRENT_ADDRESS, mac_address, sizeof(mac_address)) != sizeof(mac_address))
+#if 0
+  uint32_t OID_LIST_SIZE = rndis_query(OID_GEN_SUPPORTED_LIST, NULL, 0);
+  printf("Size of OID_GEN_SUPPORTED_LIST: %lu\n", OID_LIST_SIZE);
+  uint32_t *oid_list = new(std::nothrow) uint32_t[OID_LIST_SIZE/sizeof(uint32_t)];
+  if (oid_list) {
+    OID_LIST_SIZE = rndis_query(OID_GEN_SUPPORTED_LIST, oid_list, OID_LIST_SIZE);
+    uint32_t *OID = oid_list;
+    puts("Querying supported OIDs:");
+    while (OID_LIST_SIZE >= sizeof(*OID)) {
+      printf("%08lX: ", *OID);
+      printf("%08lX\n", rndis_query(*OID, NULL, 0));
+      ++OID;
+      OID_LIST_SIZE -= sizeof(*OID);
+    }
+    delete[] oid_list;
+  }
+#endif
+  if (rndis_query(OID_802_3_CURRENT_ADDRESS, mac_address, sizeof(mac_address)) != sizeof(mac_address)) {
+    puts("Failed to get MAC address");
     return;
+  }
   printf("MAC Address: %02X:%02X:%02X:%02X:%02X:%02X\n", mac_address[0], mac_address[1], mac_address[2], mac_address[3], mac_address[4], mac_address[5]);
-  if (rndis_query(OID_GEN_MAXIMUM_FRAME_SIZE, &MTU, sizeof(MTU)) != sizeof(MTU))
+  if (rndis_query(OID_GEN_MAXIMUM_FRAME_SIZE, &MTU, sizeof(MTU)) != sizeof(MTU)) {
+    puts("Failed to get MTU");
     return;
+  }
   printf("MTU: %lu\n", MTU);
-  if (rndis_query(OID_GEN_MAXIMUM_TOTAL_SIZE, &MAX_FRAME_LEN, sizeof(MAX_FRAME_LEN)) != sizeof(MAX_FRAME_LEN))
+  if (rndis_query(OID_GEN_MAXIMUM_TOTAL_SIZE, &MAX_FRAME_LEN, sizeof(MAX_FRAME_LEN)) != sizeof(MAX_FRAME_LEN)) {
+    puts("Failed to get MAX_FRAME_LEN");
     return;
+  }
   printf("MAX_FRAME_LEN: %lu\n", MAX_FRAME_LEN);
   uint32_t packet_filter = 0xF;
   uint32_t status = rndis_set(OID_GEN_CURRENT_PACKET_FILTER, &packet_filter, sizeof(packet_filter));
-  if (status != RNDIS_STATUS_SUCCESS)
+  if (status != RNDIS_STATUS_SUCCESS) {
+    puts("Failed to set CURRENT_PACKET_FILTER");
     return;
+  }
   if (rndis_query(OID_GEN_CURRENT_PACKET_FILTER, &packet_filter, sizeof(packet_filter)) != sizeof(packet_filter))
     return;
   printf("Packet filter was set to 0x%02lX\n", packet_filter);
-  if (rndis_query(OID_GEN_LINK_SPEED, &link_speed, sizeof(link_speed)) != sizeof(link_speed))
+  if (rndis_query(OID_GEN_LINK_SPEED, &link_speed, sizeof(link_speed)) != sizeof(link_speed)) {
+    puts("Failed to get link speed");
     return;
+  }
   printf("Link Speed: %lu\n", link_speed);
   data_receive();
 }
