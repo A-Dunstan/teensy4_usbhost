@@ -19,7 +19,7 @@
 #ifndef _USB_CH341_SERIAL_H
 #define _USB_CH341_SERIAL_H
 
-#include <teensy4_usbhost.h>
+#include "../teensy4_usbhost.h"
 #include <HardwareSerial.h>
 #include <EventResponder.h>
 

@@ -19,7 +19,7 @@
 #ifndef _USB_MASS_STORAGE_H
 #define _USB_MASS_STORAGE_H
 
-#include <teensy4_usbhost.h>
+#include "../teensy4_usbhost.h"
 #include <atomic>
 #include <list>
 

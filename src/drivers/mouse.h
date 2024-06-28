@@ -19,7 +19,7 @@
 #ifndef _USB_MOUSE_H
 #define _USB_MOUSE_H
 
-#include <teensy4_usbhost.h>
+#include "../teensy4_usbhost.h"
 
 /* mouse driver sends this to event queue.
  * The boot protocol is very basic, it only defines the
