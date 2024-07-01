@@ -101,19 +101,16 @@ DMAMEM ATOM_QUEUE TeensyUSB<irq,phy,ehci,pll>::g_usbqueue;
 
 class TeensyUSBHost1 : public TeensyUSB<IRQ_USB1, IMXRT_USBPHY1_ADDRESS, IMXRT_USB1_ADDRESS, IMXRT_CCM_ANALOG_ADDRESS+0x10> {
 public:
-  TeensyUSBHost1() = default;
+  TeensyUSBHost1();
 };
 
 class TeensyUSBHost2 : public TeensyUSB<IRQ_USB2, IMXRT_USBPHY2_ADDRESS, IMXRT_USB2_ADDRESS, IMXRT_CCM_ANALOG_ADDRESS+0x20> {
 #ifdef ARDUINO_TEENSY41
 private:
   void port_power(uint8_t port, bool set) override;
+#endif
 public:
   TeensyUSBHost2();
-#else
-public:
-  TeensyUSBHost2() = default;
-#endif
 };
 
 #include "drivers/drivers.h"

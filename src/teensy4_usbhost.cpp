@@ -226,15 +226,19 @@ void TeensyUSB<irq,phy,ehci,pll>::thread(void) {
   atomQueueDelete(&g_usbqueue);
 }
 
-#ifdef ARDUINO_TEENSY41
+FLASHMEM TeensyUSBHost1::TeensyUSBHost1() {}
+
 FLASHMEM TeensyUSBHost2::TeensyUSBHost2() {
+#ifdef ARDUINO_TEENSY41
   // enable USB protection IC GPIO (initially off)
   IOMUXC_SW_MUX_CTL_PAD_GPIO_EMC_40 = 5;
   IOMUXC_SW_PAD_CTL_PAD_GPIO_EMC_40 = 0x0008;  // slow speed, weak 150 ohm drive
   GPIO8_GDIR |= 1 << 26;
   GPIO8_DR_CLEAR = 1 << 26;
+#endif
 }
 
+#ifdef ARDUINO_TEENSY41
 void TeensyUSBHost2::port_power(uint8_t port, bool set) {
   if (port == 0) {
     if (set) {
