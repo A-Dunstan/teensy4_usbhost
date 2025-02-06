@@ -35,3 +35,6 @@
 #ifdef USE_RNDIS
 #include "rndis.h"
 #endif
+
+#include "FL2000.h"
+
