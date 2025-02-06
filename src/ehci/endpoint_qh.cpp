@@ -194,6 +194,10 @@ void cache_invalidate(usb_qTD_aligned* qtd) {
   cache_invalidate(qtd, sizeof(*qtd), alignof(*qtd));
 }
 
+void cache_flush_invalidate(usb_qTD_aligned* qtd) {
+  cache_flush_invalidate(qtd, sizeof(*qtd), alignof(*qtd));
+}
+
 void QH_Base::update(void) {
   while (pending != dummy.get()) {
     int ret = 0;
@@ -290,9 +294,8 @@ bool QH_Base::enqueue_transfer(usb_transfer* head) {
   dummy.reset(head);                 // head becomes new dummy
   head->token.status = 0x40;         // set inactive+halted
   *p = *head;                        // copy over dummy (becomes new head)
-  cache_flush(p);                    // ensure new qTD data is updated _before_ activating
   cache_flush(head);
-  cache_sync();                      // ensure cache flush has completed
+  cache_flush_invalidate(p);         // ensure new qTD data is updated _before_ activating
   p->token.status = 0x80;            // set old dummy/new head active
   cache_flush(p);                    // flush (triggers overlay if QH is idle)
 

@@ -39,6 +39,7 @@ public:
   virtual void update(void) = 0;
   virtual void flush(void) {}
 
+  // default = support nothing, subclasses will implement what they can do
   virtual int BulkTransfer(uint32_t Length, void *buffer, const USBCallback* cb) {
     return -EOPNOTSUPP;
   }
