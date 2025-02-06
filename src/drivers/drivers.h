@@ -38,3 +38,6 @@
 
 #include "FL2000.h"
 
+#ifdef USE_XBOX360
+#include "xbox360pad.h"
+#endif
