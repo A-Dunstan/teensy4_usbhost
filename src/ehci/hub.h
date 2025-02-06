@@ -28,7 +28,7 @@ private:
     uint32_t state;
     class USB_Device *device;
     uint32_t timeout_start;
-  } port[7];
+  } port[8];
 
   virtual void port_power(uint8_t port, bool set) = 0;
   virtual void port_reset(uint8_t port, bool set) = 0;
