@@ -64,12 +64,8 @@ class usb_transfer : public usb_qTD_aligned  {
       cache_flush(&src);
   }
 public:
-  CCallback<class usb_transfer>* cb;
-  class usb_transfer *error_handler;
-
-  usb_transfer() :
-  cb(NULL),
-  error_handler(NULL) {}
+  CCallback<class usb_transfer>* cb = NULL;
+  class usb_transfer *error_handler = NULL;
 
   virtual ~usb_transfer() = default;
 
@@ -77,70 +73,107 @@ public:
 };
 
 class static_usb_transfer : public usb_transfer {
-  void* operator new(size_t); // undefined, this class doesn't support dynamic allocation
-  void operator delete(void*,size_t) {}
+//  void* operator new(size_t); // undefined, this class doesn't support non-array dynamic allocation
+  void operator delete(void*p,size_t) {}
 };
 
 class bulk_interrupt_transfer : public usb_transfer, private CCallback<usb_transfer> {
 private:
-  const USBCallback& cbi;
-  void* const dst;
-  uint32_t const dlength;
-  static_usb_transfer extra[3];
+   const USBCallback& cbi;
+   void* const dst;
+   uint32_t const dlength;
+   static_usb_transfer *more = NULL;
 
-  void callback(const usb_transfer*,int result) override {
+   ~bulk_interrupt_transfer() {
+    free(more);
+   }
+
+   void callback(const usb_transfer*,int result) override {
     if (result >= 0 && dlength) {
       result = dlength - result;
-      if (dst)
+      if (dst) // dst is NULL is this was an OUT transfer
         cache_invalidate(dst, result);
     }
     cbi(result);
+   }
+
+   uint32_t get_transfer_count(const uint8_t* p, uint32_t length, uint32_t packet_size) {
+    uint32_t tx_count = 0;
+    const uint8_t *end = p + length;
+    while (p < end) {
+      uint32_t tlength = 5*4096 - ((uint32_t)p & 0xFFF);
+      uint32_t left = end - p;
+      if (left <= tlength)
+        break;
+    // intermediate transfers must be a multiple of the endpoint packet size
+      tlength &= ~(packet_size-1);
+      p += tlength;
+      ++tx_count;
+    }
+    return tx_count;
+   }
+
+  void add_more(usb_transfer& t, usb_transfer* next, usb_transfer* alt, bool interrupt, uint32_t& length, uint8_t PID, uint8_t*& ptr, uint32_t max_packet)
+  {
+    uint32_t tlength = 5*4096 - ((uint32_t)ptr & 0xFFF);
+    if (tlength >= length) tlength = length;
+    else tlength &= ~(max_packet-1);
+    fill_qtd(t, next, alt, true, tlength, interrupt, PID, ptr);
+    ptr += tlength;
+    length -= tlength;
   }
 
 public:
-  bulk_interrupt_transfer(bool dir_in, uint32_t length, void *buffer, const USBCallback* _cb, uint32_t max_packet) :
-  cbi(*_cb),
-  dst(dir_in ? buffer : NULL),
-  dlength(length) {
+   bulk_interrupt_transfer(bool dir_in, uint32_t length, void *buffer, const USBCallback* _cb, uint32_t max_packet) :
+   cbi(*_cb),
+   dst(dir_in ? buffer : NULL),
+   dlength(length) {
+    // need a byte pointer for arithmetic
+    uint8_t *p = (uint8_t*)buffer;
+
     if (length) {
+      // we either have to flush or invalidate (depends on direction), may as well do both
       cache_flush_invalidate(buffer, length);
     }
 
     uint8_t PID = dir_in ? 1:0;
-    uint32_t length0 = 5*4096 - ((uint32_t)buffer & 0xFFF);
+    add_more(*this, this, NULL, true, length, PID, p, max_packet);
 
-    cb = extra[0].cb = extra[1].cb = extra[2].cb = this;
-    extra[0].error_handler = extra[1].error_handler = &extra[2];
+    if (length) {
+      // more transfers are required
+      uint32_t tcount = get_transfer_count(p, length, max_packet);
 
-    if (length0 >= length)
-      fill_qtd(*this, this, NULL, true, length, true, PID, buffer);
-    else {
-      /* cascaded transfers must ensure their lengths are multiples of wMaxPacketSize
-       * else the device may trigger babble
+      /* GCC BUG: new[] doesn't work properly for aligned objects.
+       * The compiler allocates extra space for array metadata at the beginning
+       * then increments the aligned pointer forward to cover it - this misaligns
+       * the returned objects!
+       * So just use aligned_alloc and placement new...
        */
-      length0 -= length0 % max_packet;
-      const uint8_t* b = (const uint8_t*)buffer + length0;
-      length -= length0;
-      error_handler = &extra[2];
-      fill_qtd(*this, &extra[2], this, true, length0, false, PID, buffer);
-      length0 = 5*4096 - ((uint32_t)b & 0xFFF);
-      cb = extra[0].cb = extra[1].cb = NULL;
-      if (length > length0) {
-        next = &extra[0];
-        size_t i=0;
-        while (length > length0) {
-          length0 -= length0 % max_packet;
-          fill_qtd(extra[i], &extra[i+1], this, true, length0, false, PID, b);
-          b += length0;
-          length -= length0;
-          length0 = 5*4096 - ((uint32_t)b & 0xFFF);
-          i++;
-        }
-        extra[i-1].next = &extra[2];
+      if (0) { // change the free() calls above if this is enabled...
+        more = new(std::nothrow) static_usb_transfer[tcount+1];
+      } else {
+        more = (static_usb_transfer*)aligned_alloc(__alignof__(static_usb_transfer), sizeof(static_usb_transfer)*(tcount+1));
+        new(more) static_usb_transfer[tcount+1];
       }
-      fill_qtd(extra[2], this, NULL, true, (uint16_t)length, true, PID, b);
+
+    // fix head
+      next = &more[0];
+      alt = this;
+      token.IOC = 0;
+      error_handler = &more[tcount];
+
+    // fill extra transfers
+      for (uint32_t i=0; i < tcount; i++) {
+        add_more(more[i], &more[i+1], this, false, length, PID, p, max_packet);
+        more[i].error_handler = &more[tcount];
+      }
+      // final transfer
+      fill_qtd(more[tcount], this, NULL, true, length, true, PID, p);
+      more[tcount].cb = this;
     }
-  }
+    else
+      cb = this;
+   }
 };
 
 class control_transfer : public usb_transfer, private CCallback<usb_transfer>, private usb_control_transfer {
@@ -315,19 +348,13 @@ bool QH_Base::enqueue_transfer(usb_transfer* head) {
 }
 
 int QH_Base::BulkIntrTransfer(bool dir_in, uint32_t Length, void *buffer, const USBCallback* cb) {
-  uint32_t max_length = 4*5*4096 - ((uint32_t)buffer & 0xFFF);
-  if (Length > max_length) {
-    dprintf("bulk_interrupt transfer too big\n");
-    errno = E2BIG;
+  usb_transfer *msg = new(std::nothrow) bulk_interrupt_transfer(dir_in, Length, buffer, cb, capabilities.wMaxPacketSize);
+  if (msg == NULL) {
+    errno = ENOMEM;
   } else {
-    usb_transfer *msg = new(std::nothrow) bulk_interrupt_transfer(dir_in, Length, buffer, cb, capabilities.wMaxPacketSize);
-    if (msg == NULL) {
-      errno = ENOMEM;
-    } else {
-      if (enqueue_transfer(msg) == true)
-        return 0;
-      delete msg;
-    }
+    if (enqueue_transfer(msg) == true)
+      return 0;
+    delete msg;
   }
   return -1;
 }
