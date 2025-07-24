@@ -9,7 +9,7 @@ static EventResponder monitor_responder;
 #define HEIGHT 240
 #define FREQ 60
 
-static uint16_t fb[WIDTH*HEIGHT] DMAMEM;
+static uint16_t fb[WIDTH*HEIGHT] DMAMEM __attribute__((aligned(32)));
 static int framecount;
 
 void monitor_event(EventResponder& ev) {
