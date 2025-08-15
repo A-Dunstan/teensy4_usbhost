@@ -67,8 +67,6 @@ class XBOX360Pad : public USB_Driver, public USB_Driver::Factory {
   static const usb_endpoint_descriptor* find_endpoint(const void*,size_t&);
   void interrupt_in(int);
   void interrupt_out(int);
-  void SetLED(uint8_t);
-  void SetRumble(uint8_t,uint8_t);
 
   // Factory overrides
   bool offer(const usb_interface_descriptor*, size_t) override;
@@ -81,12 +79,12 @@ public:
   operator bool() const { return ready; }
 
   // values 6-9 are the typical player 1-4 indicators
-  void setLed(uint8_t led_value) { SetLED(led_value); }
+  void setLED(uint8_t led_value);
   // there's two rumble motors: one is smaller and produces lighter vibration
-  void setRumble(uint8_t heavy, uint8_t light) { SetRumble(heavy, light); }
+  void setRumble(uint8_t heavy, uint8_t light);
 
   // capture the current button state
-  void update(void) { old_buttons = cur_buttons, cur_buttons = state.buttons; }
+  uint16_t update(void) { return old_buttons = cur_buttons, cur_buttons = state.buttons; }
   // buttons that stayed down since last update call
   uint16_t held(void) const { return old_buttons & cur_buttons; }
   // buttons that went up or down since last update
@@ -99,6 +97,7 @@ public:
   uint16_t buttons(void) const { return cur_buttons; }
   uint8_t triggerL(void) const { return state.trigger[0]; }
   uint8_t triggerR(void) const { return state.trigger[1]; }
+  // stick ranges: -32768 to 32767
   int stickLX(void) const { return state.stick[0][0]; }
   int stickLY(void) const { return state.stick[0][1]; }
   int stickRX(void) const { return state.stick[1][0]; }

@@ -60,16 +60,16 @@ void XBOX360Pad::interrupt_out(int r) {
 
     if (flags & FLAG_SETLED) {
       flags &= ~FLAG_SETLED;
-      SetLED(led);
+      setLED(led);
     } else if (flags & FLAG_SETRUMBLE) {
       flags &= ~FLAG_SETRUMBLE;
-      SetRumble(motor_heavy, motor_light);
+      setRumble(motor_heavy, motor_light);
     }
     atomMutexPut(&lock);
   }
 }
 
-FLASHMEM void XBOX360Pad::SetLED(uint8_t new_led) {
+FLASHMEM void XBOX360Pad::setLED(uint8_t new_led) {
   atomMutexGet(&lock, 10);
 
   if (flags & FLAG_INPROGRESS) {
@@ -85,7 +85,7 @@ FLASHMEM void XBOX360Pad::SetLED(uint8_t new_led) {
   atomMutexPut(&lock);
 }
 
-void XBOX360Pad::SetRumble(uint8_t heavy, uint8_t light) {
+void XBOX360Pad::setRumble(uint8_t heavy, uint8_t light) {
   atomMutexGet(&lock, 10);
 
   if (flags & FLAG_INPROGRESS) {
@@ -158,8 +158,8 @@ FLASHMEM USB_Driver* XBOX360Pad::attach(const usb_interface_descriptor* id, size
       dprintf("Found XBOX360 compatible controller, ep_in = %02X, ep_out = %02X\n", ep_in, ep_out);
       setDevice(dev);
       flags = 0;
+      setLED(6);
       InterruptMessage(ep_in, sizeof(rep_in), rep_in, &in_cb);
-      SetLED(6);
       return this;
     }
   }
