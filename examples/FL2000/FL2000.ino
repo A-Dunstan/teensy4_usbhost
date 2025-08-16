@@ -3,15 +3,18 @@
 static DMAMEM TeensyUSBHost2 usb;
 static FL2000 fl2000;
 
-static EventResponder monitor_responder;
 
-#define WIDTH 320
-#define HEIGHT 240
+#define WIDTH 512
+#define HEIGHT 480
 #define FREQ 60
 
 static uint16_t fb[WIDTH*HEIGHT] DMAMEM __attribute__((aligned(32)));
 static int framecount;
 
+static EventResponder monitor_responder;
+/* default EventResponder behaviour is to run during idle, so this code
+ * will only ever run when loop() finishes
+ */
 void monitor_event(EventResponder& ev) {
   int status = ev.getStatus();
   auto monitor = (FL2000*)ev.getData();
@@ -30,7 +33,6 @@ void monitor_event(EventResponder& ev) {
       break;
     case MONITOR_NOTIFY_FRAMEDONE:
       ++framecount;
-//      Serial.printf("Monitor %p frame completed (%u)\n", monitor, millis());
       if ((framecount&3)==0) {
         for (size_t i=0; i < sizeof(fb)/sizeof(fb[0]); i++) {
           if (fb[i]==65535)
@@ -40,7 +42,7 @@ void monitor_event(EventResponder& ev) {
         }
       }
       if (framecount == 300) {
-//        Serial.printf("Temperature: %f\n", tempmonGetTemp());
+        Serial.printf("Temperature: %f\n", tempmonGetTemp());
         framecount = 0;
       }
       break;
