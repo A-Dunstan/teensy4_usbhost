@@ -682,10 +682,27 @@ FLASHMEM int FL2000::setFormat(unsigned short width, unsigned short height, unsi
   return -1;
 }
 
+/* It is STRONGLY PREFERRED to use this library with DMAChannels that
+ * support pre-emption. This requires the DMAChannel::begin() method to
+ * have two bool parameters instead of one. These templates ensure this code
+ * will still compile regardless of which DMAChannel implementation is found.
+ */
+template <typename C>
+void DMABEGIN(C& dma, void (DMAChannel::*)(bool, bool)) {
+  dma.begin(true, true);
+}
+template <typename C>
+void DMABEGIN(C& dma, void (DMAChannel::*)(bool)) {
+  fprintf(stderr, "Warning: DMA channel will not be pre-emptible, this may cause audio dropouts!\n");
+  dma.begin(true);
+}
+
 class FL2000DMA {
   using DMARequest = FL2000::DMARequest;
 private:
   static DMARequest* queue;
+  static DMAChannel ch1;
+  static DMAChannel ch2;
 
   static void isr(void) {
     atomIntEnter();
@@ -707,6 +724,8 @@ private:
   struct oneTimeInit {
     oneTimeInit() {
       queue = NULL;
+      DMABEGIN(ch1, &DMAChannel::begin);
+      DMABEGIN(ch2, &DMAChannel::begin);
       ch1.disable();
       ch2.disable();
       ch1.attachInterrupt(isr);
@@ -714,8 +733,6 @@ private:
   };
 
 public:
-  static DMAChannel ch1;
-  static DMAChannel ch2;
 
   static void submit_request(DMARequest* req) {
     static oneTimeInit init;
@@ -741,8 +758,8 @@ public:
 };
 
 FL2000DMA::DMARequest* FL2000DMA::queue;
-DMAChannel FL2000DMA::ch1;
-DMAChannel FL2000DMA::ch2;
+DMAChannel FL2000DMA::ch1(false);
+DMAChannel FL2000DMA::ch2(false);
 
 void FL2000::convert_dma(uint8_t* dst, uint32_t height, void* pdma) {
   uint32_t line_width = current_mode.active_width * output_bytes_per_pixel;
