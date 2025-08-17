@@ -6,6 +6,8 @@
 #include <cstdarg>
 #include <cerrno>
 
+#define ENABLE_LOGGING          1
+
 #define REQUEST_REG_READ        64
 #define REQUEST_REG_WRITE       65
 
@@ -217,7 +219,8 @@ FLASHMEM void FL2000::threadStart(uint32_t arg) {
   while(1) atomTimerDelay(1000);
 };
 
-int FL2000::dbg_log(const char* fmt, ...) {
+int FL2000::dbg_log(const char* fmt, ...) const {
+#if ENABLE_LOGGING
   va_list args;
   int i = fprintf(stderr, "FL2000<%p>: ", this);
 
@@ -232,6 +235,9 @@ int FL2000::dbg_log(const char* fmt, ...) {
     else i += j;
   }
   return i;
+#else
+  return 0;
+#endif
 }
 
 FLASHMEM int FL2000::reg_write(uint16_t offset, const uint32_t val) {

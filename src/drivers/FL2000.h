@@ -75,7 +75,7 @@ private:
   void thread(void);
   static void threadStart(uint32_t arg);
 
-  int dbg_log(const char* fmt, ...);
+  int dbg_log(const char* fmt, ...) const;
 
   EventResponder *monitor_notify;
 
