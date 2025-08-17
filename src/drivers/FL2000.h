@@ -152,6 +152,7 @@ public:
   EventResponder* set_monitor_event(EventResponder*);
 
   // simple method to set resolution: searches an internal table for a matching timing mode
+  // refresh may be 0 to match any available framerate
   int setFormat(unsigned short width, unsigned short height, unsigned short refresh, int32_t input_format, int32_t output_format=COLOR_FORMAT_AUTO);
   // advanced method: must supply timing mode information
   int setFormat(const struct mode_timing& mode, int32_t input_format, int32_t output_format=COLOR_FORMAT_AUTO);
@@ -159,7 +160,7 @@ public:
   // sets the next framebuffer to be rendered, must match the specified format
   int setFrame(const void *fb, size_t pitch);
 
-  // sets one or more palette entries, 32-bit value = 00RRGGBB
+  // sets one or more palette entries, 32-bit value = 0x00RRGGBB
   int setPalette(uint8_t index, size_t count, const uint32_t* colors);
 
   // helper function to find PLL parameters for specific frequencies

@@ -671,12 +671,25 @@ int FL2000::setPalette(uint8_t index, size_t count, const uint32_t *colors) {
 }
 
 FLASHMEM int FL2000::setFormat(unsigned short width, unsigned short height, unsigned short refresh, int32_t input_format, int32_t output_format) {
+  const struct mode_timing *best_mode = NULL;
+  unsigned short max_refresh = 0;
+
   for (size_t i=0; i < sizeof(vid_modes)/sizeof(vid_modes[0]); i++) {
     if (vid_modes[i].active_width != width) continue;
     if (vid_modes[i].active_height != height) continue;
-    if (vid_modes[i].refresh_rate != refresh) continue;
+    if (vid_modes[i].refresh_rate != refresh) {
+      if (refresh == 0) {
+        if (vid_modes[i].refresh_rate > max_refresh) {
+          max_refresh = vid_modes[i].refresh_rate;
+          best_mode = vid_modes+i;
+        }
+      }
+      continue;
+    }
     return setFormat(vid_modes[i], input_format, output_format);
   }
+  if (best_mode)
+    return setFormat(*best_mode, input_format, output_format);
 
   errno = EINVAL;
   return -1;
