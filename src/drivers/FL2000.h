@@ -35,6 +35,7 @@
 #define COLOR_FORMAT_RGB_8_332       3        // note this is not the "typical" 332 - it is RRGGGBBB
 #define COLOR_FORMAT_RGB_8_INDEXED   4
 #define COLOR_FORMAT_COMPRESSED      0x80000000
+#define COLOR_FORMAT_NODMA           0x40000000   // this avoids using DMA to copy input framedata into USB slice buffers
 
 #define VIDMODE_FLAG_HSYNC_POS     (1<<0)
 #define VIDMODE_FLAG_VSYNC_POS     (1<<1)

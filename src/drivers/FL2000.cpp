@@ -967,6 +967,10 @@ FLASHMEM int FL2000::set_mode(const struct mode_timing& mode, int32_t input_form
     {COLOR_FORMAT_RGB_8_332,      COLOR_FORMAT_RGB_8_332,     &FL2000::convert_dma},
     {COLOR_FORMAT_RGB_16_555,     COLOR_FORMAT_RGB_16_555,    &FL2000::convert_dma},
     {COLOR_FORMAT_RGB_16_565,     COLOR_FORMAT_RGB_16_565,    &FL2000::convert_dma},
+    {COLOR_FORMAT_NODMA | COLOR_FORMAT_RGB_8_INDEXED,  COLOR_FORMAT_RGB_8_INDEXED, &FL2000::convert_copy},
+    {COLOR_FORMAT_NODMA | COLOR_FORMAT_RGB_8_332,      COLOR_FORMAT_RGB_8_332,     &FL2000::convert_copy},
+    {COLOR_FORMAT_NODMA | COLOR_FORMAT_RGB_16_555,     COLOR_FORMAT_RGB_16_555,    &FL2000::convert_copy},
+    {COLOR_FORMAT_NODMA | COLOR_FORMAT_RGB_16_565,     COLOR_FORMAT_RGB_16_565,    &FL2000::convert_copy},
   };
 
   if (!monitor_plugged_in)
@@ -1001,16 +1005,17 @@ FLASHMEM int FL2000::set_mode(const struct mode_timing& mode, int32_t input_form
   }
 
   if (output_format == COLOR_FORMAT_AUTO) {
-    output_format = input_format;
+    output_format = input_format & ~COLOR_FORMAT_NODMA;
   } else if (input_format & COLOR_FORMAT_COMPRESSED) {
     // if input is compressed make sure the output is too
     output_format |= COLOR_FORMAT_COMPRESSED;
   }
 
-  int input = input_format & ~COLOR_FORMAT_COMPRESSED;
-  int output = output_format & ~COLOR_FORMAT_COMPRESSED;
+  int input = input_format & ~(COLOR_FORMAT_COMPRESSED|COLOR_FORMAT_NODMA);
+  int output = output_format & ~(COLOR_FORMAT_COMPRESSED|COLOR_FORMAT_NODMA);
 
   if (input == COLOR_FORMAT_RGB_8_INDEXED) {
+    // we don't keep a local copy of the palette so any other output format is invalid
     if (output != COLOR_FORMAT_RGB_8_INDEXED)
       return -EINVAL;
   }
@@ -1047,7 +1052,7 @@ FLASHMEM int FL2000::set_mode(const struct mode_timing& mode, int32_t input_form
     dbg_log("Couldn't find a conversion function from %08X to %08X", input_format, output_format);
     return -EINVAL;
   }
-  dbg_log("Using conversion function: %p", convert_slice);
+  dbg_log("Using conversion function %p", convert_slice);
 
   ++render_id;
   current_fb = NULL;
@@ -1120,6 +1125,7 @@ FLASHMEM int FL2000::set_mode(const struct mode_timing& mode, int32_t input_form
   switch (output) {
     case COLOR_FORMAT_RGB_8_INDEXED:
       dac_ctrl.color_palette_en = 1;
+      // fallthrough
     case COLOR_FORMAT_RGB_8_332:
       dac_ctrl.v332_mode = 1;
       break;
