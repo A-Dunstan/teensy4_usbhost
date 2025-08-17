@@ -234,9 +234,11 @@ void FL2000::thread(void) {
 
 FLASHMEM void FL2000::threadStart(uint32_t arg) {
   class FL2000* p = (class FL2000*)arg;
-  p->thread();
-  p->dbg_log("ERROR workThread exited!");
-  while(1) atomTimerDelay(1000);
+  // FIXME: thread cannot exit!
+  while (1) {
+    p->thread();
+    p->dbg_log("ERROR workThread exited!");
+  }
 };
 
 int FL2000::dbg_log(const char* fmt, ...) const {
