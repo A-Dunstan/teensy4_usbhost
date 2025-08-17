@@ -116,8 +116,7 @@ struct FL2000::threadMsg {
     frame_request* frame_req;
     pal_request* pal_req;
     struct {
-      uint8_t *block;
-      void* dma;
+      FL2000::slice_data *s;
       uint32_t id;
     } slice;
   };
@@ -174,14 +173,12 @@ void FL2000::thread(void) {
           atomSemPut(&msg.mode_req->sema);
           break;
         case CMD_SEND_SLICE:
-          send_slice(msg.slice.block, msg.slice.id, msg.slice.dma);
+          send_slice(msg.slice.s, msg.slice.id);
           break;
         case CMD_SLICE_DONE:
-          // make sure render context is still current
+          // make sure previous render context is still current
           if (msg.slice.id == render_id) {
-            if (sent_lines < max_lines) {
-              begin_slice(msg.slice.block, msg.slice.dma);
-            }
+            begin_slice(msg.slice.s);
           } else {
             dbg_log("slice render_id mismatch");
           }
@@ -592,7 +589,9 @@ FLASHMEM void FL2000::detach(void) {
   atomQueuePut(&workQueue, 10, &msg);
 }
 
-FLASHMEM FL2000::FL2000() {
+FLASHMEM FL2000::FL2000() :
+slices{{bulk_data[0]}, {bulk_data[1]}}
+{
   monitor_notify = NULL;
   render_id = 0;
   atomThreadCreate(&workThread, 80, threadStart, (uint32_t)this, workStack, sizeof(workStack), 0);
@@ -731,8 +730,8 @@ private:
       next = head->next;
     } while (StoreExclusivePtr(next, &queue));
     if (next) {
-      ch1 = next->ch1;
-      ch2 = next->ch2;
+      ch1 = next->line_end0;
+      ch2 = next->line_begin;
     }
     head->callback();
     atomIntExit(FALSE);
@@ -751,26 +750,34 @@ private:
   };
 
 public:
-
-  static void submit_request(DMARequest* req) {
+  static void submit_request(DMARequest& req) {
     static oneTimeInit init;
 
-    DMARequest** head;
+    // end of line_begin minor loop triggers ch2
+    FL2000DMA::ch2.triggerAtTransfersOf(req.line_begin);
+    // end of line_begin major loop triggers ch1
+    FL2000DMA::ch1.triggerAtCompletionOf(req.line_begin);
+    // end of line_end0 minor loop triggers ch2
+    FL2000DMA::ch2.triggerAtTransfersOf(req.line_end0);
+    // end of line_end1 minor loop triggers ch1
+    FL2000DMA::ch1.triggerAtTransfersOf(req.line_end1);
+
+    DMARequest** tail;
     do {
-      head = &queue;
+      tail = &queue;
       // this relies on LDREX/STREX not actually caring about a non-matching pointer i.e. a full range reservation
-      DMARequest* p = LoadExclusivePtr(head);
+      DMARequest* p = LoadExclusivePtr(tail);
       while (p != NULL) {
-        head = &p->next;
-        p = *head;
+        tail = &p->next;
+        p = *tail;
       }
 
-      req->next = NULL;
-    } while (StoreExclusivePtr(req, head));
+      req.next = NULL;
+    } while (StoreExclusivePtr(&req, tail));
 
-    if (head == &queue) {
-      ch1 = req->ch1;
-      ch2 = req->ch2;
+    if (tail == &queue) {
+      ch1 = req.line_end0;
+      ch2 = req.line_begin;
     }
   }
 };
@@ -779,98 +786,105 @@ FL2000DMA::DMARequest* FL2000DMA::queue;
 DMAChannel FL2000DMA::ch1(false);
 DMAChannel FL2000DMA::ch2(false);
 
-void FL2000::convert_dma(uint8_t* dst, uint32_t height, void* pdma) {
+void FL2000::convert_dma(slice_data* s, uint32_t height) {
+  uint8_t* dst = s->data;
   uint32_t line_width = current_mode.active_width * output_bytes_per_pixel;
   uint32_t slice_size = height * line_width;
 
   if (current_src == NULL) {
-    send_slice(dst, slice_size);
+    send_slice(s, slice_size);
     return;
   }
 
-  DMARequest *req = (DMARequest*)pdma;
-  DMASetting& s1 = req->ch1;
-  DMASetting& s2 = req->ch2;
-  req->callback = [=](void) {
+  s->dma_req.callback = [=](void) {
     threadMsg msg = {
       .cmd = CMD_SEND_SLICE,
       .slice = {
-        .block  = dst,
-        .dma = pdma,
+        .s = s,
         .id = slice_size
       }
     };
     if (atomQueuePut(&workQueue, -1, &msg) != ATOM_OK) {
+      dbg_log("Failed to send CMD_SEND_SLICE");
       digitalWriteFast(13, 1);
     }
   };
 
-  s2.TCD->SADDR = current_src;
-  s2.TCD->SOFF = 8;
-  s2.TCD->ATTR_SRC = DMA_TCD_ATTR_SIZE_64BIT;
-  s2.TCD->ATTR_DST = DMA_TCD_ATTR_SIZE_32BIT;
-  s2.TCD->NBYTES_MLOFFYES = DMA_TCD_NBYTES_DMLOE | DMA_TCD_NBYTES_MLOFFYES_MLOFF(16) | DMA_TCD_NBYTES_MLOFFYES_NBYTES(8);
-  s2.TCD->DADDR = dst + 4;
-  s2.TCD->DOFF = -4;
-  s2.TCD->CSR = DMA_TCD_CSR_START;
+  auto TCDbegin = s->dma_req.line_begin.TCD;
+  auto TCDend0 = s->dma_req.line_end0.TCD;
+  auto TCDend1 = s->dma_req.line_end1.TCD;
 
-  if (current_mode.flags & VIDMODE_FLAG_LINEDOUBLE) {
-    // s1 = copy odd dst lines to even dst lines
-    s1.TCD->SADDR = dst;
-    s1.TCD->SOFF = 8;
-    s1.TCD->ATTR_SRC = DMA_TCD_ATTR_SIZE_64BIT;
-    s1.TCD->ATTR_DST = DMA_TCD_ATTR_SIZE_64BIT;
-    s1.TCD->NBYTES_MLOFFYES = DMA_TCD_NBYTES_SMLOE | DMA_TCD_NBYTES_DMLOE | DMA_TCD_NBYTES_MLOFFYES_MLOFF(line_width) | DMA_TCD_NBYTES_MLOFFYES_NBYTES(line_width);
-    s1.TCD->DADDR = dst+line_width;
-    s1.TCD->DOFF = 8;
-    s1.TCD->DLASTSGA = 0;
-    s1.TCD->CITER = s1.TCD->BITER = height / 2;
-    s1.TCD->CSR = 0;
-    // s2 = reorder src dwords to dst odd lines
-    s2.TCD->SLAST = current_pitch - line_width;
-    s2.TCD->DLASTSGA = line_width + 16; // odd lines only
-    s2.TCD->CITER = s2.TCD->BITER = line_width / 8;
-
-    cache_flush(current_src, height * current_pitch/2);
-    current_src += height * current_pitch/2;
+  int16_t soff;
+  uint8_t attr_src;
+  size_t align = ((size_t)current_src | current_pitch) & 7;
+  if (align & 1) {
+    soff = 1;
+    attr_src = DMA_TCD_ATTR_SIZE_8BIT;
+  } else if (align & 2) {
+    soff = 2;
+    attr_src = DMA_TCD_ATTR_SIZE_16BIT;
+  } else if (align & 4) {
+    soff = 4;
+    attr_src = DMA_TCD_ATTR_SIZE_32BIT;
   } else {
-    // s1 = copy last 8 bytes of each row
-    s1.TCD->SADDR = current_src + line_width - 8;
-    s1.TCD->SOFF = current_pitch;
-    s1.TCD->ATTR_SRC = DMA_TCD_ATTR_SIZE_64BIT;
-    s1.TCD->ATTR_DST = DMA_TCD_ATTR_SIZE_32BIT;
-    s1.TCD->NBYTES_MLOFFYES = DMA_TCD_NBYTES_DMLOE | DMA_TCD_NBYTES_MLOFFYES_MLOFF(line_width + 8) | DMA_TCD_NBYTES_MLOFFYES_NBYTES(8);
-    s1.TCD->DADDR = dst + line_width - 4;
-    s1.TCD->DOFF = -4;
-    s1.TCD->DLASTSGA = 0;
-    s1.TCD->CITER = s1.TCD->BITER = height;
-    s1.TCD->CSR = 0;
-    // s2 = copy src dwords to dst except last 8 bytes
-    s2.TCD->SLAST = current_pitch - (line_width - 8);
-    s2.TCD->DLASTSGA = 16+8;
-    s2.TCD->CITER = s2.TCD->BITER = (line_width / 8) - 1;
-
-    cache_flush(current_src, height * current_pitch);
-    current_src += height * current_pitch;
+    soff = 8;
+    attr_src = DMA_TCD_ATTR_SIZE_64BIT;
   }
 
-  // end of s2 minor loop triggers ch2
-  FL2000DMA::ch2.triggerAtTransfersOf(s2);
-  // end of s2 major loop triggers ch1
-  FL2000DMA::ch1.triggerAtCompletionOf(s2);
-  // end of s1 minor loop triggers ch2
-  FL2000DMA::ch2.triggerAtTransfersOf(s1);
-  // end of s1 major signals completion
-  s1.interruptAtCompletion();
+  // line_begin: copy all pixels of line except last 8 bytes
+  TCDbegin->SADDR = current_src;
+  TCDbegin->SOFF = soff;
+  TCDbegin->ATTR_SRC = attr_src;
+  TCDbegin->ATTR_DST = DMA_TCD_ATTR_SIZE_32BIT;
+  TCDbegin->NBYTES_MLOFFYES = DMA_TCD_NBYTES_DMLOE | DMA_TCD_NBYTES_MLOFFYES_MLOFF(16) | DMA_TCD_NBYTES_MLOFFYES_NBYTES(8);
+  TCDbegin->DADDR = dst + 4;
+  TCDbegin->DOFF = -4;
+  TCDbegin->SLAST = current_pitch - (line_width - 8);
+  TCDbegin->DLASTSGA = 16+8;
+  TCDbegin->CITER = TCDbegin->BITER = (line_width / 8) - 1;
+  TCDbegin->CSR = DMA_TCD_CSR_START;
 
-  FL2000DMA::submit_request(req);
+  // line_end0: copy second last 4 or last 8 bytes per line
+  TCDend0->SADDR = current_src + line_width - 8;
+  TCDend0->ATTR_SRC = attr_src;
+  TCDend0->ATTR_DST = DMA_TCD_ATTR_SIZE_32BIT;
+  TCDend0->DADDR = dst + line_width - 4;
+  TCDend0->CITER = TCDend0->BITER = height;
+  if (align == 0) { // no need for end1
+    TCDend0->SOFF = current_pitch;
+    TCDend0->NBYTES_MLOFFYES = DMA_TCD_NBYTES_DMLOE | DMA_TCD_NBYTES_MLOFFYES_MLOFF(line_width + 8) | DMA_TCD_NBYTES_MLOFFYES_NBYTES(8);
+    TCDend0->DOFF = -4;
+    TCDend0->DLASTSGA = 0;
+    TCDend0->CSR = DMA_TCD_CSR_INTMAJOR;
+  } else {
+    TCDend0->SOFF = TCDend1->SOFF = soff;
+    TCDend0->NBYTES_MLOFFYES = \
+    TCDend1->NBYTES_MLOFFYES = DMA_TCD_NBYTES_SMLOE | DMA_TCD_NBYTES_MLOFFYES_MLOFF(current_pitch - 4) | DMA_TCD_NBYTES_MLOFFYES_NBYTES(4);
+    TCDend0->DOFF = TCDend1->DOFF = line_width;
+    TCDend0->DLASTSGA = (int32_t)TCDend1;
+    TCDend0->CSR = DMA_TCD_CSR_ESG;
+
+    // line_end1: copy last 4 bytes per line
+    TCDend1->SADDR = current_src + line_width - 4;
+    TCDend1->ATTR_SRC = attr_src;
+    TCDend1->ATTR_DST = DMA_TCD_ATTR_SIZE_32BIT;
+    TCDend1->DADDR = dst + line_width - 8;
+    TCDend1->DLASTSGA = 0;
+    TCDend1->CITER = TCDend1->BITER = height;
+    TCDend1->CSR = DMA_TCD_CSR_INTMAJOR | DMA_TCD_CSR_START;
+    cache_flush(TCDend1, sizeof(*TCDend1));
+  }
+
+  cache_flush(current_src, height * current_pitch);
+  current_src += height * current_pitch;
+
+  FL2000DMA::submit_request(s->dma_req);
 }
 
-void FL2000::convert_rgb24_to_rgb8(uint8_t* dst, uint32_t height,void*) {
+void FL2000::convert_rgb24_to_rgb8(slice_data* s, uint32_t height) {
+  uint8_t* dst = s->data;
   uint32_t width = current_mode.active_width;
-  bool linedouble = current_mode.flags & VIDMODE_FLAG_LINEDOUBLE;
   const uint8_t* src = current_src;
-  uint8_t* dst0 = dst;
 
   if (src) {
     for (uint32_t i=0; i < height; i++) {
@@ -883,24 +897,18 @@ void FL2000::convert_rgb24_to_rgb8(uint8_t* dst, uint32_t height,void*) {
 
       src += current_pitch;
       dst += width;
-      if (linedouble) {
-        memcpy(dst, dst-width, width);
-        dst += width;
-        i++;
-      }
     }
 
     current_src = src;
   }
 
-  send_slice(dst0, height*width);
+  send_slice(s, height*width);
 }
 
-void FL2000::convert_rgb565_to_rgb8(uint8_t* dst, uint32_t height,void*) {
+void FL2000::convert_rgb565_to_rgb8(slice_data *s, uint32_t height) {
+  uint8_t* dst = s->data;
   uint32_t width = current_mode.active_width;
-  bool linedouble = current_mode.flags & VIDMODE_FLAG_LINEDOUBLE;
   const uint8_t* src = current_src;
-  uint8_t* dst0 = dst;
 
   if (src) {
     for (size_t i=0; i < height; i++) {
@@ -913,24 +921,18 @@ void FL2000::convert_rgb565_to_rgb8(uint8_t* dst, uint32_t height,void*) {
 
       src += current_pitch;
       dst += width;
-      if (linedouble) {
-        memcpy(dst, dst-width, width);
-        dst += width;
-        i++;
-      }
     }
 
     current_src = src;
   }
 
-  send_slice(dst0, height*width);
+  send_slice(s, height*width);
 }
 
-void FL2000::convert_rgb555_to_rgb8(uint8_t* dst, uint32_t height,void*) {
+void FL2000::convert_rgb555_to_rgb8(slice_data *s, uint32_t height) {
+  uint8_t* dst = s->data;
   uint32_t width = current_mode.active_width;
-  bool linedouble = current_mode.flags & VIDMODE_FLAG_LINEDOUBLE;
   const uint8_t* src = current_src;
-  uint8_t* dst0 = dst;
 
   if (src) {
     for (size_t i=0; i < height; i++) {
@@ -943,22 +945,17 @@ void FL2000::convert_rgb555_to_rgb8(uint8_t* dst, uint32_t height,void*) {
 
       src += current_pitch;
       dst += width;
-      if (linedouble) {
-        memcpy(dst, dst-width, width);
-        dst += width;
-        i++;
-      }
     }
 
     current_src = src;
   }
 
-  send_slice(dst0, height*width);
+  send_slice(s, height*width);
 }
 
-void FL2000::convert_copy(uint8_t* dst, uint32_t height,void*) {
+void FL2000::convert_copy(slice_data *slice, uint32_t height) {
+  uint8_t* dst = slice->data;
   uint32_t width = current_mode.active_width * output_bytes_per_pixel;
-  bool linedouble = current_mode.flags & VIDMODE_FLAG_LINEDOUBLE;
   size_t pitch = current_pitch;
 
   uint32_t* d = (uint32_t*)dst;
@@ -974,27 +971,18 @@ void FL2000::convert_copy(uint8_t* dst, uint32_t height,void*) {
       }
 
       s += pitch;
-      if (linedouble) {
-        memcpy(d, d-w, width);
-        d += w;
-        i++;
-      }
     }
 
     current_src = (const uint8_t*)s;
   }
 
-  send_slice(dst, height*width);
+  send_slice(slice, height*width);
 }
 
-struct conversion_entry {
-  int32_t input_format;
-  int32_t output_format;
-  void (FL2000::*func)(uint8_t*,uint32_t,void*);
-};
-
 FLASHMEM int FL2000::set_mode(const struct mode_timing& mode, int32_t input_format, int32_t output_format) {
-  static const struct conversion_entry convert_table[] PROGMEM = {
+  static const struct conversion_entry {
+     int32_t input_format;        int32_t output_format;      void (FL2000::*func)(FL2000::slice_data*,uint32_t);
+  } convert_table[] PROGMEM = {
     {COLOR_FORMAT_RGB_24,         COLOR_FORMAT_RGB_8_332,     &FL2000::convert_rgb24_to_rgb8},
     {COLOR_FORMAT_RGB_16_565,     COLOR_FORMAT_RGB_8_332,     &FL2000::convert_rgb565_to_rgb8},
     {COLOR_FORMAT_RGB_16_555,     COLOR_FORMAT_RGB_8_332,     &FL2000::convert_rgb555_to_rgb8},
@@ -1092,8 +1080,8 @@ FLASHMEM int FL2000::set_mode(const struct mode_timing& mode, int32_t input_form
   ++render_id;
   current_fb = NULL;
   next_fb = NULL;
-  max_lines = mode.active_height * ((mode.flags & VIDMODE_FLAG_LINEDOUBLE) ? 2:1);
-  sent_lines = 0;
+  max_lines = mode.active_height;
+  next_line = 0;
   output_bytes_per_pixel = bytes_per_pixel;
 
   current_mode = mode;
@@ -1214,8 +1202,9 @@ FLASHMEM int FL2000::set_mode(const struct mode_timing& mode, int32_t input_form
     dbg_log("hdmi_init complete");
   }
 
-  cache_invalidate(bulk_data[0], sizeof(bulk_data[0]));
-  cache_invalidate(bulk_data[1], sizeof(bulk_data[1]));
+  // any cached data here is unneeded, throw it out
+  cache_invalidate(slices[0].data, FL2000_SLICE_SIZE);
+  cache_invalidate(slices[1].data, FL2000_SLICE_SIZE);
 
   return frame_begin();
 }
@@ -1310,28 +1299,27 @@ FLASHMEM int FL2000::hdmi_init(void) {
 
 int FL2000::frame_begin(void) {
   current_src = current_fb;
-  sent_lines = 0;
+  next_line = 0;
 
   if (current_src == NULL) {
-    memset(bulk_data[0], 0, sizeof(bulk_data[0]));
-    memset(bulk_data[1], 0, sizeof(bulk_data[1]));
+    memset(slices[0].data, 0, FL2000_SLICE_SIZE);
+    memset(slices[1].data, 0, FL2000_SLICE_SIZE);
   }
 
-  begin_slice(bulk_data[0], &dma_req[0]);
-  if (sent_lines < max_lines)
-    begin_slice(bulk_data[1], &dma_req[1]);
+  begin_slice(slices+0);
+  if (next_line < max_lines)
+    begin_slice(slices+1);
 
   return 0;
 }
 
-void FL2000::begin_slice(uint8_t* dst, void* dma) {
-  if (sent_lines >= max_lines) {
-    dbg_log("begin_slice sent_lines >= max_lines");
+void FL2000::begin_slice(slice_data* slice) {
+  if (next_line >= max_lines) {
+    dbg_log("begin_slice next_line >= max_lines");
     while(1);
   }
-  uint16_t lines_to_fill = max_lines - sent_lines;
+  uint16_t lines_to_fill = max_lines - next_line;
   uint16_t max_slice_lines = FL2000_SLICE_SIZE / (current_mode.active_width * output_bytes_per_pixel);
-  if (current_mode.flags & VIDMODE_FLAG_LINEDOUBLE) max_slice_lines &= ~1;
 
   if (lines_to_fill > max_slice_lines)
     lines_to_fill = max_slice_lines;
@@ -1341,60 +1329,103 @@ void FL2000::begin_slice(uint8_t* dst, void* dma) {
     while(1);
   }
 
-  sent_lines += lines_to_fill;
+  if (current_mode.flags & VIDMODE_FLAG_LINEDOUBLE) {
+    /* Use scatter-gather USB bulk messages to send each line twice.
+     * This is more efficient than doubling each line in memory and sending
+     * slices in one continuous block (USB bandwidth is the same either way).
+     */
+
+    slice->sg.resize(lines_to_fill+2);
+    uint8_t *src = slice->data;
+    uint16_t bytes_per_line = current_mode.active_width * output_bytes_per_pixel;
+
+    // first transfer: single line
+    slice->sg[0].data = src;
+    slice->sg[0].wLength = bytes_per_line;
+
+    auto sg = &slice->sg[1];
+    for (size_t line = 1; line < lines_to_fill; line++) {
+      // middle transfers: pairs of lines
+      sg->data = src;
+      sg->wLength = 2*bytes_per_line;
+      ++sg;
+      src += bytes_per_line;
+    }
+    // last transfer: single line
+    sg[0].data = src;
+    sg[0].wLength = bytes_per_line;
+    // terminate sg list
+    sg[1].data = NULL;
+  }
+
+  next_line += lines_to_fill;
+  slice->last = next_line >= max_lines;
   // fill output
-  (this->*convert_slice)(dst, lines_to_fill, dma);
+  (this->*convert_slice)(slice, lines_to_fill);
 }
 
-void FL2000::send_slice(uint8_t* dst, size_t slice_len, void* dma) {
-  if (BulkMessage(1, slice_len, dst, [=](int r) {
+void FL2000::send_slice(slice_data *slice, size_t slice_len) {
+  /* ensure render_id value is captured NOW, not used indirectly through "this"
+   * when the lambda is executed.
+   */
+  auto r_id = render_id;
+
+  auto slice_cb = [=, sendit = !slice->last](int r) {
     if (r >= 0) {
-      if (1 || sent_lines < max_lines) {
+      if (sendit && next_line < max_lines) {
         threadMsg msg = {
           .cmd = CMD_SLICE_DONE,
           .slice = {
-            .block = dst,
-            .dma = dma,
-            .id = render_id
+            .s = slice,
+            .id = r_id,
           }
         };
         if (atomQueuePut(&workQueue, -1, &msg) != ATOM_OK) {
           dbg_log("Failed to send CMD_SLICE_DONE msg");
-          digitalWriteFast(13, 1);
         }
       }
     } else {
-      dbg_log("BulkMessage returned error: %d", r);
-      digitalWriteFast(13, 1);
+      dbg_log("BulkMessage returned error (sending slice): %d", r);
     }
-  }) < 0) {
-    dbg_log("Sending BulkMessage failed");
-    while(1);
+  };
+
+  int r;
+  if (current_mode.flags & VIDMODE_FLAG_LINEDOUBLE)
+    r = BulkMessage(1, &slice->sg[0], slice_cb);
+  else
+    r = BulkMessage(1, slice_len, slice->data, slice_cb);
+  if (r < 0) {
+    dbg_log("Sending BulkMessage (slice) failed");
+    return;
   }
 
-  if (sent_lines == max_lines) {
-    ++sent_lines;
+  if (slice->last) {
+    /* notify monitor callback now (before sending zlp) so
+     * it can do things like flip to a new buffer / change palette / etc.
+     * so that these commands can get queued before CMD_FRAME_DONE,
+     * since that command begins the processing of the next frame.
+     */
     if (monitor_notify)
       monitor_notify->triggerEvent(MONITOR_NOTIFY_FRAMEDONE, this);
 
-    if (BulkMessage(1, 0, NULL, [=](int r) {
+    auto zlp_cb = [=](int r) {
       if (r >= 0) {
         threadMsg msg = {
           .cmd = CMD_FRAME_DONE,
           .slice = {
-            .id = render_id
+            .id = r_id
           }
         };
         if (atomQueuePut(&workQueue, -1, &msg) != ATOM_OK) {
           dbg_log("Failed to send CMD_FRAME_DONE msg");
-          digitalWriteFast(13, 1);
         }
       } else {
-        digitalWriteFast(13, 1);
+        dbg_log("BulkMessage returned error (sending zlp): %d", r);
       }
-    }) < 0) {
+    };
+
+    if (BulkMessage(1, 0, NULL, zlp_cb) < 0) {
       dbg_log("Sending ZLP BulkMessage failed");
-      while(1);
     }
   }
 }

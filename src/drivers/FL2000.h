@@ -22,6 +22,7 @@
 #include "../teensy4_usbhost.h"
 #include <EventResponder.h>
 #include <DMAChannel.h>
+#include <vector>
 
 #define MONITOR_NOTIFY_ERROR         -1
 #define MONITOR_NOTIFY_DISCONNECTED  0
@@ -67,6 +68,8 @@ struct mode_timing {
 class FL2000 : public USB_Driver, public USB_Driver::Factory {
 friend class FL2000DMA;
 private:
+  uint8_t bulk_data[2][FL2000_SLICE_SIZE] __attribute__((aligned(32)));
+
   struct threadMsg;
 
   ATOM_TCB workThread;
@@ -83,7 +86,6 @@ private:
   bool has_ITE66121;
   uint8_t edid[128];
 
-  void (FL2000::*convert_slice)(uint8_t* dst, uint32_t height,void* dma);
   mode_timing current_mode;
 
   const uint8_t* current_fb;
@@ -91,7 +93,7 @@ private:
   size_t current_pitch;
   const uint8_t* next_fb;
   size_t next_pitch;
-  uint16_t sent_lines;
+  uint16_t next_line;
   uint16_t max_lines;
   uint32_t render_id;
   uint32_t output_bytes_per_pixel;
@@ -100,12 +102,19 @@ private:
   uint32_t reg_data[8] __attribute__((aligned(32)));
 
   struct DMARequest {
-    DMASetting ch1, ch2;
+    DMASetting line_begin;
+    DMASetting line_end0;
+    DMASetting line_end1;
     std::function<void(void)> callback;
     struct DMARequest *next;
   };
-  uint8_t bulk_data[2][FL2000_SLICE_SIZE] __attribute__((aligned(32)));
-  DMARequest dma_req[2];
+
+  struct slice_data {
+    uint8_t* const data;
+    DMARequest dma_req;
+    std::vector<usb_bulkintr_sg> sg;
+    bool last;
+  } slices[2];
 
   int reg_write(uint16_t offset, const uint32_t val);
   int reg_read(uint16_t offset, uint32_t& val);
@@ -126,8 +135,8 @@ private:
   int set_mode(const struct mode_timing& mode, int32_t input_format, int32_t output_format);
 
   int frame_begin(void);
-  void begin_slice(uint8_t* dst, void* dma);
-  void send_slice(uint8_t* dst, size_t slice_len, void* dma=NULL);
+  void begin_slice(slice_data*);
+  void send_slice(slice_data*,size_t slice_len);
 
   int device_init(void);
 
@@ -138,11 +147,12 @@ private:
 
   int forwardMsg(struct sync_request& req, threadMsg& msg);
 
-  void convert_rgb24_to_rgb8(uint8_t*,uint32_t,void*);
-  void convert_rgb565_to_rgb8(uint8_t*,uint32_t,void*);
-  void convert_rgb555_to_rgb8(uint8_t*,uint32_t,void*);
-  void convert_copy(uint8_t*,uint32_t,void*);
-  void convert_dma(uint8_t*,uint32_t,void*);
+  void (FL2000::*convert_slice)(slice_data* slice, uint32_t height);
+  void convert_rgb24_to_rgb8(slice_data*,uint32_t);
+  void convert_rgb565_to_rgb8(slice_data*,uint32_t);
+  void convert_rgb555_to_rgb8(slice_data*,uint32_t);
+  void convert_copy(slice_data*,uint32_t);
+  void convert_dma(slice_data*,uint32_t);
 
 public:
   FL2000();
