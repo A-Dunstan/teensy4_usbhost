@@ -423,52 +423,54 @@ FLASHMEM int FL2000::device_init(void) {
   uint32_t data;
   has_ITE66121 = false;
   ret = i2c_read_dword(I2C_ADDRESS_HDMI, 0, data);
-  if (ret >= 0) {
-    // vendor 0x4954, device 0x612, top 4 bits are revision (don't care)
-    if ((data & 0x0FFFFFFF) == 0x06124954) {
-      // HDMI encoder is ITE Tech IT66121
-      dbg_log("found HDMI encoder");
-      // reset HDMI
-      ret = i2c_write_byte_masked(I2C_ADDRESS_HDMI, ITE_REG_SW_RESET, ITE_REG_SW_RESET_REF_CLOCK, ITE_REG_SW_RESET_REF_CLOCK);
-      if (ret < 0) return ret;
-      // gate all except RCLK (I2C)
-      ret = i2c_write_byte_masked(I2C_ADDRESS_HDMI, ITE_REG_GATE_BANK_CTRL, ~ITE_REG_GATE_BANK_CTRL_RCLK, ITE_REG_GATE_BANK_CTRL_GATE_ALL);
-      if (ret < 0) return ret;
-      // turn on TxCLK
-      ret = i2c_write_byte_masked(I2C_ADDRESS_HDMI, ITE_REG_INT_CTRL, 0, ITE_REG_INT_CTRL_TXCLK);
-      if (ret < 0) return ret;
-      // power on DRV
-      ret = i2c_write_byte_masked(I2C_ADDRESS_HDMI, ITE_REG_AFE_DRV, 0, ITE_REG_AFE_DRV_PWD);
-      if (ret < 0) return ret;
-      // power on XPLL
-      ret = i2c_write_byte_masked(I2C_ADDRESS_HDMI, ITE_REG_AFE_XP, 0, ITE_REG_AFE_XP_PWDI | ITE_REG_AFE_XP_PWDPLL);
-      if (ret < 0) return ret;
-      // power on IPLL
-      ret = i2c_write_byte_masked(I2C_ADDRESS_HDMI, ITE_REG_AFE_IP, 0, ITE_REG_AFE_IP_PWDPLL);
-      if (ret < 0) return ret;
-      // clear DRV_RST
-      ret = i2c_write_byte_masked(I2C_ADDRESS_HDMI, ITE_REG_AFE_DRV, 0, ITE_REG_AFE_DRV_RST);
-      if (ret < 0) return ret;
-      // set XP_RESETB
-      ret = i2c_write_byte_masked(I2C_ADDRESS_HDMI, ITE_REG_AFE_XP, ITE_REG_AFE_XP_RESETB, ITE_REG_AFE_XP_RESETB);
-      if (ret < 0) return ret;
-      // set IP_RESETB
-      ret = i2c_write_byte_masked(I2C_ADDRESS_HDMI, ITE_REG_AFE_IP, ITE_REG_AFE_IP_RESETB, ITE_REG_AFE_IP_RESETB);
-      if (ret < 0) return ret;
-      // poke XP_TEST register?
-      ret = i2c_write_byte(I2C_ADDRESS_HDMI, ITE_REG_AFE_XP_TEST, 0x70);
-      if (ret < 0) return ret;
-      // poke AFE_EN
-      ret = i2c_write_byte(I2C_ADDRESS_HDMI, ITE_REG_AFE_EN, 0x1F);
-      if (ret < 0) return ret;
-      // set output current level
-      ret = i2c_write_byte(I2C_ADDRESS_HDMI, ITE_REG_AFE_LEVEL, ITE_REG_AFE_LEVEL_DRV_ISW(7));
-      if (ret < 0) return ret;
-      // power on RCLK, IACLK, TXCLK
-      ret = i2c_write_byte_masked(I2C_ADDRESS_HDMI, ITE_REG_GATE_BANK_CTRL, ITE_REG_GATE_BANK_CTRL_CRCLK, ITE_REG_GATE_BANK_CTRL_GATE_ALL);
-      if (ret < 0) return ret;
-      has_ITE66121 = true;
-    }
+  // vendor 0x4954, device 0x612, top 4 bits are revision (don't care)
+  if (ret < 0) {
+    dbg_log("No ID returned from I2C HDMI - assuming VGA only");
+  } else if ((data & 0x0FFFFFFF) != 0x06124954) {
+    dbg_log("ID returned for HDMI encoder is unrecognized: %08X", data);
+  } else {
+    // HDMI encoder is ITE Tech IT66121
+    dbg_log("found IT66121 HDMI encoder");
+    // reset HDMI
+    ret = i2c_write_byte_masked(I2C_ADDRESS_HDMI, ITE_REG_SW_RESET, ITE_REG_SW_RESET_REF_CLOCK, ITE_REG_SW_RESET_REF_CLOCK);
+    if (ret < 0) return ret;
+    // gate all except RCLK (I2C)
+    ret = i2c_write_byte_masked(I2C_ADDRESS_HDMI, ITE_REG_GATE_BANK_CTRL, ~ITE_REG_GATE_BANK_CTRL_RCLK, ITE_REG_GATE_BANK_CTRL_GATE_ALL);
+    if (ret < 0) return ret;
+    // turn on TxCLK
+    ret = i2c_write_byte_masked(I2C_ADDRESS_HDMI, ITE_REG_INT_CTRL, 0, ITE_REG_INT_CTRL_TXCLK);
+    if (ret < 0) return ret;
+    // power on DRV
+    ret = i2c_write_byte_masked(I2C_ADDRESS_HDMI, ITE_REG_AFE_DRV, 0, ITE_REG_AFE_DRV_PWD);
+    if (ret < 0) return ret;
+    // power on XPLL
+    ret = i2c_write_byte_masked(I2C_ADDRESS_HDMI, ITE_REG_AFE_XP, 0, ITE_REG_AFE_XP_PWDI | ITE_REG_AFE_XP_PWDPLL);
+    if (ret < 0) return ret;
+    // power on IPLL
+    ret = i2c_write_byte_masked(I2C_ADDRESS_HDMI, ITE_REG_AFE_IP, 0, ITE_REG_AFE_IP_PWDPLL);
+    if (ret < 0) return ret;
+    // clear DRV_RST
+    ret = i2c_write_byte_masked(I2C_ADDRESS_HDMI, ITE_REG_AFE_DRV, 0, ITE_REG_AFE_DRV_RST);
+    if (ret < 0) return ret;
+    // set XP_RESETB
+    ret = i2c_write_byte_masked(I2C_ADDRESS_HDMI, ITE_REG_AFE_XP, ITE_REG_AFE_XP_RESETB, ITE_REG_AFE_XP_RESETB);
+    if (ret < 0) return ret;
+    // set IP_RESETB
+    ret = i2c_write_byte_masked(I2C_ADDRESS_HDMI, ITE_REG_AFE_IP, ITE_REG_AFE_IP_RESETB, ITE_REG_AFE_IP_RESETB);
+    if (ret < 0) return ret;
+    // poke XP_TEST register?
+    ret = i2c_write_byte(I2C_ADDRESS_HDMI, ITE_REG_AFE_XP_TEST, 0x70);
+    if (ret < 0) return ret;
+    // poke AFE_EN
+    ret = i2c_write_byte(I2C_ADDRESS_HDMI, ITE_REG_AFE_EN, 0x1F);
+    if (ret < 0) return ret;
+    // set output current level
+    ret = i2c_write_byte(I2C_ADDRESS_HDMI, ITE_REG_AFE_LEVEL, ITE_REG_AFE_LEVEL_DRV_ISW(7));
+    if (ret < 0) return ret;
+    // power on RCLK, IACLK, TXCLK
+    ret = i2c_write_byte_masked(I2C_ADDRESS_HDMI, ITE_REG_GATE_BANK_CTRL, ITE_REG_GATE_BANK_CTRL_CRCLK, ITE_REG_GATE_BANK_CTRL_GATE_ALL);
+    if (ret < 0) return ret;
+    has_ITE66121 = true;
   }
 
   // enable interrupts, set EOF notification method and other misc. setup
@@ -524,6 +526,7 @@ FLASHMEM int FL2000::process_interrupt(void) {
       // retrieve EDID block 0
       if (has_ITE66121) {
         dbg_log("UNIMPLEMENTED: reading EDID from HDMI");
+        memset(edid, 0xFF, 8);
       } else { // read EDID from DSUB
         uint32_t d[2];
         if (i2c_read_dword(I2C_ADDRESS_DSUB, 0, d[0])>=0 &&
