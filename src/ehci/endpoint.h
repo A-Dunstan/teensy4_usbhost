@@ -40,13 +40,13 @@ public:
   virtual void flush(void) {}
 
   // default = support nothing, subclasses will implement what they can do
-  virtual int BulkTransfer(uint32_t Length, void *buffer, const USBCallback* cb) {
+  virtual int BulkTransfer(const usb_bulkintr_sg*, const USBCallback* cb) {
     return -EOPNOTSUPP;
   }
-  virtual int InterruptTransfer(uint32_t Length, void *buffer, const USBCallback* cb) {
+  virtual int InterruptTransfer(const usb_bulkintr_sg*, const USBCallback* cb) {
     return -EOPNOTSUPP;
   }
-  virtual int IsochronousTransfer(isolength& Lengths, void *buffer, const USBCallback* cb) {
+  virtual int IsochronousTransfer(isolength& lengths, void *buffer, const USBCallback* cb) {
     return -EOPNOTSUPP;
   }
 

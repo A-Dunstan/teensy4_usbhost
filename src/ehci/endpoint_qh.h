@@ -80,7 +80,7 @@ protected:
   void update(void);
   void flush(void);
   bool enqueue_transfer(usb_transfer* head);
-  int BulkIntrTransfer(bool dir_in, uint32_t Length, void *buffer, const USBCallback* cb);
+  int BulkIntrTransfer(bool dir_in, const usb_bulkintr_sg* sg, const USBCallback* cb);
   QH_Base(uint8_t endpoint, uint16_t max_packet_size, uint8_t hub, uint8_t port, uint8_t address, uint8_t speed);
   ~QH_Base();
   uint32_t link_to() const { return ((uint32_t)&horizontal_link)+2; }

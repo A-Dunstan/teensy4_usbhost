@@ -115,6 +115,26 @@ int USB_Driver::BulkMessage(uint8_t bEndpoint, uint32_t dLength, void *data, con
   return -1;
 }
 
+int USB_Driver::BulkMessage(uint8_t bEndpoint, const usb_bulkintr_sg* sg, const USBCallback* cb_func) {
+  usb_msg_t msg = {
+    .type = USB_MSG_DEVICE_BULK_SG_TRANSFER,
+    .device = {
+      .cb = cb_func,
+      .bulkintr = {
+        .bEndpoint = bEndpoint,
+        .sg = sg
+      }
+    }
+  };
+  if (device == NULL) errno = ENOENT;
+  else {
+    if (device->pushMessage(msg))
+      return 0;
+    errno = ENOMEM;
+  }
+  return -1;
+}
+
 int USB_Driver::InterruptMessage(uint8_t bEndpoint, uint16_t wLength, void *data, const USBCallback* cb_func) {
   usb_msg_t msg = {
     .type = USB_MSG_DEVICE_INTERRUPT_TRANSFER,
@@ -199,6 +219,18 @@ int USB_Driver::IsochronousMessage(uint8_t bEndpoint, isolength& Lengths, void *
     errno = ENOMEM;
   } else {
     if (IsochronousMessage(bEndpoint, Lengths, data, &cb->wrap) >= 0)
+      return 0;
+    delete cb;
+  }
+  return -1;
+}
+
+int USB_Driver::BulkMessage(uint8_t bEndpoint, const usb_bulkintr_sg* sg, USBCallback cb_func) {
+  FuncWrapper* cb = new (std::nothrow) FuncWrapper(cb_func);
+  if (cb == NULL) {
+    errno = ENOMEM;
+  } else {
+    if (BulkMessage(bEndpoint, sg, &cb->wrap) >= 0)
       return 0;
     delete cb;
   }

@@ -65,7 +65,6 @@ class usb_transfer : public usb_qTD_aligned  {
   }
 public:
   CCallback<class usb_transfer>* cb = NULL;
-  class usb_transfer *error_handler = NULL;
 
   virtual ~usb_transfer() = default;
 
@@ -73,107 +72,97 @@ public:
 };
 
 class static_usb_transfer : public usb_transfer {
-//  void* operator new(size_t); // undefined, this class doesn't support non-array dynamic allocation
+  // single unit allocation not supported
+  void* operator new(size_t);
+  /* single unit deallocation does nothing - should only be used as part of
+   * another class or as an array
+   */
   void operator delete(void*p,size_t) {}
+
+public:
+  /* GCC BUG: default new[] doesn't work properly for aligned objects with constructors/destructors
+   * The compiler allocates extra space for array metadata at the beginning
+   * then increments the aligned pointer forward to cover it - this misaligns the returned objects!
+   */
+  void* operator new[](size_t size, std::align_val_t align) {
+    size_t a = (size_t)align;
+    // round up to alignment size
+    auto len = (size + a - 1) & -a;
+    uint8_t* p = (uint8_t*)aligned_alloc(a, len);
+    if (p) // increment over unused space
+      p += len - size;
+
+    return p;
+  }
+  void operator delete[](void* ptr, size_t, std::align_val_t align) {
+    size_t a = (size_t)align;
+    if (ptr == NULL) return;
+
+    // round pointer down to alignment boundary
+    size_t p = (size_t)ptr & -a;
+    free((void*)p);
+  }
 };
 
 class bulk_interrupt_transfer : public usb_transfer, private CCallback<usb_transfer> {
 private:
    const USBCallback& cbi;
-   void* const dst;
-   uint32_t const dlength;
-   static_usb_transfer *more = NULL;
-
-   ~bulk_interrupt_transfer() {
-    free(more);
-   }
+   int ilength = 0;
+   std::unique_ptr<static_usb_transfer[]> more;
 
    void callback(const usb_transfer*,int result) override {
-    if (result >= 0 && dlength) {
-      result = dlength - result;
-      if (dst) // dst is NULL is this was an OUT transfer
-        cache_invalidate(dst, result);
-    }
-    cbi(result);
+     if (result >= 0 && ilength) {
+       result = ilength - result;
+     }
+     cbi(result);
    }
 
-   uint32_t get_transfer_count(const uint8_t* p, uint32_t length, uint32_t packet_size) {
-    uint32_t tx_count = 0;
-    const uint8_t *end = p + length;
-    while (p < end) {
-      uint32_t tlength = 5*4096 - ((uint32_t)p & 0xFFF);
-      uint32_t left = end - p;
-      if (left <= tlength)
-        break;
-    // intermediate transfers must be a multiple of the endpoint packet size
-      tlength &= ~(packet_size-1);
-      p += tlength;
-      ++tx_count;
-    }
-    return tx_count;
-   }
-
-  void add_more(usb_transfer& t, usb_transfer* next, usb_transfer* alt, bool interrupt, uint32_t& length, uint8_t PID, uint8_t*& ptr, uint32_t max_packet)
-  {
-    uint32_t tlength = 5*4096 - ((uint32_t)ptr & 0xFFF);
-    if (tlength >= length) tlength = length;
-    else tlength &= ~(max_packet-1);
-    fill_qtd(t, next, alt, true, tlength, interrupt, PID, ptr);
-    ptr += tlength;
-    length -= tlength;
-  }
+   bulk_interrupt_transfer(const USBCallback* _cb) : cbi(*_cb) {}
 
 public:
-   bulk_interrupt_transfer(bool dir_in, uint32_t length, void *buffer, const USBCallback* _cb, uint32_t max_packet) :
-   cbi(*_cb),
-   dst(dir_in ? buffer : NULL),
-   dlength(length) {
-    // need a byte pointer for arithmetic
-    uint8_t *p = (uint8_t*)buffer;
+  static usb_transfer* create_bulk_interrupt_transfer(bool dir_in, const usb_bulkintr_sg* sg, const USBCallback* cb) {
+    bulk_interrupt_transfer* t = new(std::nothrow) bulk_interrupt_transfer(cb);
+    if (t) {
+      uint8_t PID = dir_in ? 1:0;
 
-    if (length) {
-      // we either have to flush or invalidate (depends on direction), may as well do both
-      cache_flush_invalidate(buffer, length);
-    }
+      size_t tcount = 0;
+      usb_transfer *last;
 
-    uint8_t PID = dir_in ? 1:0;
-    add_more(*this, this, NULL, true, length, PID, p, max_packet);
+      do {
+        auto l = sg[tcount].wLength;
+        if (l) {
+          t->ilength += l;
+          cache_flush_invalidate(sg[tcount].data, l);
+        }
+      } while (sg[++tcount].data != NULL);
 
-    if (length) {
-      // more transfers are required
-      uint32_t tcount = get_transfer_count(p, length, max_packet);
+      if (--tcount) {
+        static_usb_transfer* more = new static_usb_transfer[tcount];
+        if (more == NULL) {
+          delete t;
+          return NULL;
+        }
+        t->more.reset(more);
+        last = &more[tcount - 1];
 
-      /* GCC BUG: new[] doesn't work properly for aligned objects.
-       * The compiler allocates extra space for array metadata at the beginning
-       * then increments the aligned pointer forward to cover it - this misaligns
-       * the returned objects!
-       * So just use aligned_alloc and placement new...
-       */
-      if (0) { // change the free() calls above if this is enabled...
-        more = new(std::nothrow) static_usb_transfer[tcount+1];
-      } else {
-        more = (static_usb_transfer*)aligned_alloc(__alignof__(static_usb_transfer), sizeof(static_usb_transfer)*(tcount+1));
-        new(more) static_usb_transfer[tcount+1];
+        // first transfer
+        fill_qtd(*t, more, t, true, sg->wLength, false, PID, sg->data);
+        ++sg;
+        // middle transfer(s)
+        for (auto p = more; p < last; p++) {
+          fill_qtd(*p, p+1, t, true, sg->wLength, false, PID, sg->data);
+          ++sg;
+        }
       }
+      else last = t;
 
-    // fix head
-      next = &more[0];
-      alt = this;
-      token.IOC = 0;
-      error_handler = &more[tcount];
-
-    // fill extra transfers
-      for (uint32_t i=0; i < tcount; i++) {
-        add_more(more[i], &more[i+1], this, false, length, PID, p, max_packet);
-        more[i].error_handler = &more[tcount];
-      }
       // final transfer
-      fill_qtd(more[tcount], this, NULL, true, length, true, PID, p);
-      more[tcount].cb = this;
+      fill_qtd(*last, t, t, true, sg->wLength, true, PID, sg->data);
+      last->cb = t;
     }
-    else
-      cb = this;
-   }
+
+    return t;
+  }
 };
 
 class control_transfer : public usb_transfer, private CCallback<usb_transfer>, private usb_control_transfer {
@@ -245,16 +234,10 @@ void QH_Base::update(void) {
       dprintf("USB TRANSFER ERROR %p %08lX\n", t, t->token.val);
       ret = -EPIPE;
       uint32_t status = t->token.status;
-      if (t->error_handler) {
-        usb_transfer *n = t->error_handler;
+      while (t->cb == NULL) {
+        usb_transfer &n = static_cast<usb_transfer&>(*t->next);
         delete t;
-        t = n;
-      } else {
-        while (t->cb == NULL) {
-          usb_transfer &n = static_cast<usb_transfer&>(*t->next);
-          delete t;
-          t = &n;
-        }
+        t = &n;
       }
 
       if (status & 0x20)
@@ -347,8 +330,8 @@ bool QH_Base::enqueue_transfer(usb_transfer* head) {
   return true;
 }
 
-int QH_Base::BulkIntrTransfer(bool dir_in, uint32_t Length, void *buffer, const USBCallback* cb) {
-  usb_transfer *msg = new(std::nothrow) bulk_interrupt_transfer(dir_in, Length, buffer, cb, capabilities.wMaxPacketSize);
+int QH_Base::BulkIntrTransfer(bool dir_in, const usb_bulkintr_sg* sg, const USBCallback* cb) {
+  usb_transfer *msg = bulk_interrupt_transfer::create_bulk_interrupt_transfer(dir_in, sg, cb);
   if (msg == NULL) {
     errno = ENOMEM;
   } else {
@@ -477,8 +460,8 @@ public:
   USB_Async_Endpoint(endpoint & 0xF, max_packet_size & 0x7FF, hub_addr, port, address, speed, USB_ENDPOINT_BULK),
   dir_in(endpoint & 0x80) {}
 
-  int BulkTransfer(uint32_t Length, void *buffer, const USBCallback* cb) override {
-    return BulkIntrTransfer(dir_in, Length, buffer, cb);
+  int BulkTransfer(const usb_bulkintr_sg* sg, const USBCallback* cb) override {
+    return BulkIntrTransfer(dir_in, sg, cb);
   }
 };
 
@@ -514,8 +497,8 @@ private:
     }
   }
 public:
-  int InterruptTransfer(uint32_t Length, void *buffer, const USBCallback* cb) override {
-    return BulkIntrTransfer(dir_in, Length, buffer, cb);
+  int InterruptTransfer(const usb_bulkintr_sg* sg, const USBCallback* cb) override {
+    return BulkIntrTransfer(dir_in, sg, cb);
   }
   void update(void) override { QH_Base::update(); }
   void flush(void) override { QH_Base::flush(); }

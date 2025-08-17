@@ -77,10 +77,12 @@ private:
   void activate_configuration(int configuration);
 
   bool prepare_control_transfer(usb_msg_t& msg);
+  int bulk_intr_transfer(uint32_t dLength, void* data, uint16_t packet_align, const std::function<int(const usb_bulkintr_sg*)> &Transfer);
   void BulkTransfer(uint8_t bEndpoint, uint32_t dLength, void* data, const USBCallback* cb);
-  void InterruptTransfer(uint8_t bEndpoint, uint32_t dLength, void* data, const USBCallback* cb);
+  void InterruptTransfer(uint8_t bEndpoint, uint16_t dLength, void* data, const USBCallback* cb);
   void IsochronousTransfer(uint8_t bEndpoint, isolength& Lengths, void* data, const USBCallback* cb);
   void ControlTransfer(uint8_t bmRequestType, uint8_t bmRequest, uint16_t wValue, uint16_t wIndex, uint16_t wLength, void *data, CCallback<usb_control_transfer>*);
+  void BulkTransfer(uint8_t bEndpoint, const usb_bulkintr_sg* sg, const USBCallback* cb);
 
 public:
   bool pushMessage(usb_msg_t&);

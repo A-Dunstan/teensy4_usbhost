@@ -52,16 +52,24 @@ protected:
   void setDevice(USB_Device *d) {device = d;}
   // return a const pointer so it can only be compared, not accessed
   const USB_Device* getDevice(void) { return device; }
+  /* Bulk messages can be either scatter/gather or regular:
+   * Scatter/gather messages contain an array of (possibly non-consecutive) buffers and lengths, one transfer per buffer is performed. Each buffer can be a maximum of
+   * 16384 - 20480 bytes, depending on its starting offset within a 4096 byte page.
+   * The end of a message is indicated by a NULL buffer - this means zero-length transfers must have a non-NULL data pointer!
+   * Regular messages take a single consecutive buffer which will be broken into multiple transfers if neccessary.
+   */
   // asynchronous, temporary callback object
   int ControlMessage(uint8_t bmRequestType, uint8_t bmRequest, uint16_t wValue, uint16_t wIndex, uint16_t wLength, void *data, const USBCallback&);
   int BulkMessage(uint8_t bEndpoint, uint32_t dLength, void *data, USBCallback);
   int InterruptMessage(uint8_t bEndpoint, uint16_t wLength, void *data, USBCallback);
   int IsochronousMessage(uint8_t bEndpoint, isolength&, void *data, USBCallback);
+  int BulkMessage(uint8_t bEndpoint, const usb_bulkintr_sg *sg, USBCallback);
   // asynchronous, callback pointer
   int ControlMessage(uint8_t bmRequestType, uint8_t bmRequest, uint16_t wValue, uint16_t wIndex, uint16_t wLength, void *data, const USBCallback*);
   int BulkMessage(uint8_t bEndpoint, uint32_t dLength, void *data, const USBCallback*);
   int InterruptMessage(uint8_t bEndpoint, uint16_t wLength, void *data, const USBCallback*);
   int IsochronousMessage(uint8_t bEndpoint, isolength&, void *data, const USBCallback*);
+  int BulkMessage(uint8_t bEndpoint, const usb_bulkintr_sg *sg, const USBCallback*);
   // synchronous
   int ControlMessage(uint8_t bmRequestType, uint8_t bmRequest, uint16_t wValue, uint16_t wIndex, uint16_t wLength, void *data);
   int BulkMessage(uint8_t bEndpoint, uint32_t dLength, void *data);

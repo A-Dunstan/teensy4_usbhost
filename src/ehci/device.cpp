@@ -394,6 +394,10 @@ void USB_Device::USBMessage(const usb_msg_t& msg) {
       IsochronousTransfer(msg.device.iso.bEndpoint, *msg.device.iso.lengths, msg.device.iso.data, msg.device.cb);
       deref();
       break;
+    case USB_MSG_DEVICE_BULK_SG_TRANSFER:
+      BulkTransfer(msg.device.bulkintr.bEndpoint, msg.device.bulkintr.sg, msg.device.cb);
+      deref();
+      break;
     default:
       dprintf("Unknown USB Device message: %d\n", msg.type);
   }
@@ -648,18 +652,92 @@ bool USB_Device::prepare_control_transfer(usb_msg_t &msg) {
   return true;
 }
 
-void USB_Device::BulkTransfer(uint8_t bEndpoint, uint32_t dLength, void *data, const USBCallback* cb) {
+int USB_Device::bulk_intr_transfer(uint32_t dLength, void* data, uint16_t packet_align, const std::function<int(const usb_bulkintr_sg*)> &Transfer) {
+  // need to check if multiple transfers will be required
+  uint8_t* src = (uint8_t*)data;
+  if ((20480 - ((size_t)src & 0xFFF)) >= dLength) { // one transfer is enough
+    // zero-length packets must have a non-NULL pointer
+    usb_bulkintr_sg sg[2] = {
+      { dLength ? data : (void*)1, (uint16_t)dLength },
+      {NULL}
+    };
+    return Transfer(sg);
+  } // else we need multiple transfers
+
+  // worst case: each transfer is 16384 bytes
+  auto num_sg = 1 + ((dLength + 16383) / 16384);
+  usb_bulkintr_sg *sg = new(std::nothrow) usb_bulkintr_sg[num_sg];
+  if (sg != NULL) {
+    auto t = sg;
+
+    while (dLength) {
+      // maximum allowed transfer size given src page alignment
+      uint16_t tlength = 20480 - ((size_t)src & 0xFFF);
+      if (tlength >= dLength) {
+        // all remaining data will fit
+        tlength = dLength;
+      } else {
+        /* more transfers will be needed:
+         * round down to a multiple of max_packet_size
+         * to avoid sending any short packets
+         */
+        tlength &= packet_align;
+      }
+      t->data = src;
+      t->wLength = tlength;
+      t++;
+
+      src += tlength;
+      dLength -= tlength;
+    }
+
+    // add terminator (length will not be accessed for this entry)
+    t->data = NULL;
+
+    int r = Transfer(sg);
+    delete[] sg;
+    return r;
+  }
+
+  errno = ENOMEM;
+  return -1;
+}
+
+void USB_Device::BulkTransfer(uint8_t bEndpoint, uint32_t dLength, void* data, const USBCallback* cb) {
   if (Endpoints[bEndpoint].type == USB_ENDPOINT_BULK) {
-    if (Endpoints[bEndpoint].ep->BulkTransfer(dLength, data, cb) == 0)
+    USB_Endpoint& endpoint = *Endpoints[bEndpoint].ep;
+    const uint16_t packet_align = ~(static_cast<USB_Async_Endpoint&>(endpoint).capabilities.wMaxPacketSize - 1);
+
+    auto Transfer = [=, &endpoint](const usb_bulkintr_sg* sg) ->int {
+      return endpoint.BulkTransfer(sg, cb);
+    };
+
+    if (bulk_intr_transfer(dLength, data, packet_align, Transfer) == 0)
       return;
   }
   else errno = ENXIO;
   (*cb)(-errno);
 }
 
-void USB_Device::InterruptTransfer(uint8_t bEndpoint, uint32_t dLength, void *data, const USBCallback* cb) {
+void USB_Device::BulkTransfer(uint8_t bEndpoint, const usb_bulkintr_sg *sg, const USBCallback* cb) {
+  if (Endpoints[bEndpoint].type == USB_ENDPOINT_BULK) {
+    if (Endpoints[bEndpoint].ep->BulkTransfer(sg, cb) == 0)
+      return;
+  }
+  else errno = ENXIO;
+  (*cb)(-errno);
+}
+
+void USB_Device::InterruptTransfer(uint8_t bEndpoint, uint16_t dLength, void *data, const USBCallback* cb) {
   if (Endpoints[bEndpoint].type == USB_ENDPOINT_INTERRUPT) {
-    if (Endpoints[bEndpoint].ep->InterruptTransfer(dLength, data, cb) == 0)
+    USB_Endpoint& endpoint = *Endpoints[bEndpoint].ep;
+    const uint16_t packet_align = ~(static_cast<USB_Periodic_Endpoint&>(endpoint).get_max_packet_size() - 1);
+
+    auto Transfer = [=, &endpoint](const usb_bulkintr_sg* sg) ->int {
+      return endpoint.InterruptTransfer(sg, cb);
+    };
+
+    if (bulk_intr_transfer(dLength, data, packet_align, Transfer) == 0)
       return;
   }
   else errno = ENXIO;
@@ -689,6 +767,7 @@ bool USB_Device::pushMessage(usb_msg_t& msg) {
     case USB_MSG_DEVICE_BULK_TRANSFER:
     case USB_MSG_DEVICE_INTERRUPT_TRANSFER:
     case USB_MSG_DEVICE_ISOCHRONOUS_TRANSFER:
+    case USB_MSG_DEVICE_BULK_SG_TRANSFER:
       msg.device.dev = this;
       refcount.fetch_add(1);
     default:

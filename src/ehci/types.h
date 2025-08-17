@@ -132,7 +132,13 @@ typedef enum {
   USB_MSG_DEVICE_BULK_TRANSFER,
   USB_MSG_DEVICE_INTERRUPT_TRANSFER,
   USB_MSG_DEVICE_ISOCHRONOUS_TRANSFER,
+  USB_MSG_DEVICE_BULK_SG_TRANSFER,
 } usb_msg_type_t;
+
+typedef struct {
+  void* data;
+  uint16_t wLength;
+} usb_bulkintr_sg;
 
 typedef struct {
   usb_msg_type_t type;
@@ -164,8 +170,13 @@ typedef struct {
         } control;
         struct {
           uint8_t bEndpoint;
-          uint32_t dLength;
-          void* data;
+          union {
+            const usb_bulkintr_sg* sg;
+            struct {
+              uint32_t dLength;
+              void* data;
+            };
+          };
         } bulkintr;
         struct {
           uint8_t bEndpoint;
