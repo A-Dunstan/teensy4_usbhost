@@ -38,14 +38,20 @@ static const struct mode_timing vid_modes[] PROGMEM = {
   {  320,    240,     60,      400,     48,     24,   525,     2,      33,   1,   73,  58, VIDMODE_FLAG_LINEDOUBLE},
   {  320,    400,     70,      400,     48,     24,   449,     2,      35,   1,   73,  58, VIDMODE_FLAG_VSYNC_POS},
   {  320,    480,     60,      400,     48,     24,   525,     2,      33,   1,   73,  58, 0},
+  {  400,    300,     60,      528,     64,     44,   628,     4,      23,   1,   8,   4,  VIDMODE_FLAG_LINEDOUBLE|VIDMODE_FLAG_HSYNC_POS|VIDMODE_FLAG_VSYNC_POS},
+  {  400,    600,     56,      512,     64,     36,   625,     2,      22,   1,   18,  10, VIDMODE_FLAG_HSYNC_POS|VIDMODE_FLAG_VSYNC_POS},
+  {  512,    384,     60,      672,     80,     68,   806,     3,      29,   1,   13,  4,  VIDMODE_FLAG_LINEDOUBLE},
   {  512,    480,     60,      672,     80,     68,   525,     2,      33,   2,  127,  30, 0},
   {  640,    350,     70,      800,     96,     48,   449,     2,      60,   1,   73,  29, VIDMODE_FLAG_HSYNC_POS},
   {  640,    400,     70,      800,     96,     48,   449,     2,      35,   1,   73,  29, VIDMODE_FLAG_VSYNC_POS},
   {  640,    480,     60,      800,     96,     48,   525,     2,      33,   1,   73,  29, 0},
+  {  720,    400,     70,      900,     108,    56,   449,     2,      32,   1,   17,  6,  VIDMODE_FLAG_VSYNC_POS},
+  {  720,    480,     60,      900,     108,    56,   525,     2,      33,   1,   17,  6,  0},
   {  768,    576,     50,      976,     104,    80,   597,     3,      17,   1,   35,  12, VIDMODE_FLAG_VSYNC_POS},
   {  768,    576,     60,      976,     104,    80,   597,     3,      17,   1,   7,   2,  VIDMODE_FLAG_VSYNC_POS},
   {  800,    600,     56,      1024,    128,    72,   625,     2,      22,   1,   18,  5,  VIDMODE_FLAG_HSYNC_POS|VIDMODE_FLAG_VSYNC_POS},
   {  800,    600,     60,      1056,    128,    88,   628,     4,      23,   1,   8,   2,  VIDMODE_FLAG_HSYNC_POS|VIDMODE_FLAG_VSYNC_POS},
+  {  848,    480,     60,      1060,    128,    64,   525,     2,      33,   1,   45,  12, 0},
 };
 
 struct mode_request {
