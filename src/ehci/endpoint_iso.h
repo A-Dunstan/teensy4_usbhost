@@ -50,6 +50,7 @@ public:
   void new_offset(void) override;
   bool set_inactive(void) override;
   void get_masks(uint8_t& smask, uint8_t& cmask) const override {smask = s_mask, cmask = c_mask;}
+  uint16_t get_max_packet_size(void) const override { return wMaxPacketSize; }
 };
 
 class USB_ISO_Full_Endpoint : public USB_ISO_Endpoint<sitd_transfer> {

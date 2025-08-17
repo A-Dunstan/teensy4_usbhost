@@ -522,6 +522,7 @@ public:
   void get_masks(uint8_t& s_mask, uint8_t& c_mask) const override { s_mask = capabilities.s_mask, c_mask = capabilities.c_mask; }
 
   bool set_inactive(void) override;
+  uint16_t get_max_packet_size(void) const override { return capabilities.wMaxPacketSize; }
 
   USB_Interrupt_Endpoint(uint8_t endpoint, uint16_t max_packet_size, uint8_t address, uint8_t hub_addr, uint8_t port, uint8_t speed, uint32_t i, PeriodicScheduler& scheduler) :
   USB_Periodic_Endpoint(USB_ENDPOINT_INTERRUPT, scheduler),

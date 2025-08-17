@@ -77,6 +77,7 @@ public:
   void activate(uint32_t _offset) { offset = _offset; new_offset(); }
   virtual void get_masks(uint8_t& s_mask, uint8_t& c_mask) const = 0;
   virtual bool set_inactive(void) = 0;
+  virtual uint16_t get_max_packet_size(void) const = 0;
 };
 
 USB_Endpoint* createIsoEndpoint(const usb_endpoint_descriptor*, uint8_t address, uint8_t hub_addr, uint8_t port, uint8_t speed, PeriodicScheduler&);
