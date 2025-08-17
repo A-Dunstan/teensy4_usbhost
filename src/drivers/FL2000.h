@@ -61,14 +61,13 @@ struct mode_timing {
   uint32_t flags;
 };
 
-
-struct threadMsg;
-
 #define FL2000_SLICE_SIZE    (16*1024)
 
 class FL2000 : public USB_Driver, public USB_Driver::Factory {
 friend class FL2000DMA;
 private:
+  struct threadMsg;
+
   ATOM_TCB workThread;
   ATOM_QUEUE workQueue;
   uint32_t workStack[512];
@@ -136,8 +135,7 @@ private:
   USB_Driver* attach(const usb_device_descriptor *d, const usb_configuration_descriptor*, USB_Device *dev) override;
   void detach(void) override;
 
-  template <class creq>
-  int forwardMsg(creq&, threadMsg&);
+  int forwardMsg(struct sync_request& req, threadMsg& msg);
 
   void convert_rgb24_to_rgb8(uint8_t*,uint32_t,void*);
   void convert_rgb565_to_rgb8(uint8_t*,uint32_t,void*);

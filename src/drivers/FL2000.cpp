@@ -74,41 +74,43 @@ static const struct mode_timing vid_modes[] PROGMEM = {
   {  848,    480,     60,      1060,    128,    64,   525,     2,      33,   1,   45,  12, 0},
 };
 
-struct mode_request {
+struct sync_request {
+  int result;
+  ATOM_SEM sema;
+};
+
+struct mode_request : sync_request {
   const struct mode_timing& mode;
   int32_t input_format;
   int32_t output_format;
-  int result;
-  ATOM_SEM sema;
 };
 
-struct frame_request {
+struct frame_request : sync_request {
   const void *src;
   size_t pitch;
-  int result;
-  ATOM_SEM sema;
 };
 
-struct pal_request {
+struct pal_request : sync_request {
   const uint32_t *src;
   uint8_t start;
   size_t count;
-  int result;
-  ATOM_SEM sema;
 };
 
-#define CMD_ATTACH              0
-#define CMD_DETACH              1
-#define CMD_INTERRUPT           2
-#define CMD_SET_MODE            3
-#define CMD_SLICE_DONE          4
-#define CMD_FRAME_DONE          5
-#define CMD_SET_NEXT_FRAME      6
-#define CMD_SET_PALETTE         7
-#define CMD_SEND_SLICE          8
+enum msg_cmd {
+  CMD_ATTACH,
+  CMD_DETACH,
+  CMD_INTERRUPT,
+  CMD_SET_MODE,
+  CMD_SLICE_DONE,
+  CMD_FRAME_DONE,
+  CMD_SET_NEXT_FRAME,
+  CMD_SET_PALETTE,
+  CMD_SEND_SLICE,
+};
 
-struct threadMsg {
-  uint32_t cmd;
+struct FL2000::threadMsg {
+  msg_cmd cmd;
+
   union {
     mode_request* mode_req;
     frame_request* frame_req;
@@ -124,7 +126,7 @@ struct threadMsg {
 void FL2000::thread(void) {
   threadMsg msgs[10];
 
-  USBCallback intr_cb = [=](int r) {
+  const USBCallback intr_cb = [=](int r) {
     if (r >= 0) {
       dbg_log("Interrupt arrived");
 
@@ -604,11 +606,12 @@ FLASHMEM EventResponder* FL2000::set_monitor_event(EventResponder* event_hook) {
   return old;
 }
 
-template <class creq>
-int FL2000::forwardMsg(creq& req, threadMsg& msg) {
+int FL2000::forwardMsg(sync_request& req, threadMsg& msg) {
   int ret = -1;
 
-  if (atomSemCreate(&req.sema, 0) == ATOM_OK) {
+  if (atomCurrentContext() == &workThread) {
+    errno = EDEADLK;
+  } else if (atomSemCreate(&req.sema, 0) == ATOM_OK) {
     if (atomQueuePut(&workQueue, 0, &msg) != ATOM_OK) {
       errno = ENXIO;
     } else if (atomSemGet(&req.sema, 0) != ATOM_OK) {
@@ -616,11 +619,12 @@ int FL2000::forwardMsg(creq& req, threadMsg& msg) {
     } else if (req.result < 0) {
       errno = -req.result;
     } else {
-      ret = 0;
+      ret = req.result;
     }
 
     atomSemDelete(&req.sema);
   }
+  else errno = ENOLCK;
 
   return ret;
 }
