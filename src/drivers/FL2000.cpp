@@ -613,9 +613,10 @@ FLASHMEM EventResponder* FL2000::set_monitor_event(EventResponder* event_hook) {
 int FL2000::forwardMsg(sync_request& req, threadMsg& msg) {
   int ret = -1;
 
-  if (atomCurrentContext() == &workThread) {
+  auto context = atomCurrentContext();
+  if (context == NULL || context == &workThread)
     errno = EDEADLK;
-  } else if (atomSemCreate(&req.sema, 0) == ATOM_OK) {
+  else if (atomSemCreate(&req.sema, 0) == ATOM_OK) {
     if (atomQueuePut(&workQueue, 0, &msg) != ATOM_OK) {
       errno = ENXIO;
     } else if (atomSemGet(&req.sema, 0) != ATOM_OK) {
