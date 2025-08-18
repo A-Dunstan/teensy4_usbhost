@@ -45,27 +45,28 @@ private:
   uint8_t fat_type = 0;
 
   // FsBlockDeviceInterface methods
-  bool isBusy();
-  bool syncDevice();
-  uint32_t sectorCount();
-  bool readSectors(uint32_t sector, uint8_t *dst, size_t ns);
-  bool readSector(uint32_t sector, uint8_t *dst) { return readSectors(sector, dst, 1); }
-  bool writeSectors(uint32_t sector, const uint8_t *src, size_t ns);
-  bool writeSector(uint32_t sector, const uint8_t *src) { return writeSectors(sector, src, 1); }
+  bool isBusy() override;
+  bool syncDevice() override;
+  uint32_t sectorCount() override;
+  bool readSectors(uint32_t sector, uint8_t *dst, size_t ns) override;
+  bool readSector(uint32_t sector, uint8_t *dst) override { return readSectors(sector, dst, 1); }
+  bool writeSectors(uint32_t sector, const uint8_t *src, size_t ns) override;
+  bool writeSector(uint32_t sector, const uint8_t *src) override { return writeSectors(sector, src, 1); }
 
   static void TimeCB(uint16_t *date, uint16_t *time, uint8_t *ms10);
 
   // FS methods
 public:
-  File open(const char *filename, uint8_t mode = FILE_READ);
-  bool exists(const char *filepath) { return FAT.exists(filepath); }
-  bool mkdir(const char *filepath) { return FAT.mkdir(filepath); }
-  bool rename(const char *oldfilepath, const char* newfilepath) { return FAT.rename(oldfilepath, newfilepath); }
-  bool remove(const char *filepath) { return FAT.remove(filepath); }
-  bool rmdir(const char *filepath) { return FAT.rmdir(filepath); }
-  uint64_t usedSize();
-  uint64_t totalSize();
-  bool mediaPresent();
+  File open(const char *filename, uint8_t mode = FILE_READ) override;
+  bool exists(const char *filepath) override { return FAT.exists(filepath); }
+  bool mkdir(const char *filepath) override { return FAT.mkdir(filepath); }
+  bool rename(const char *oldfilepath, const char* newfilepath) override { return FAT.rename(oldfilepath, newfilepath); }
+  bool remove(const char *filepath) override { return FAT.remove(filepath); }
+  bool rmdir(const char *filepath) override { return FAT.rmdir(filepath); }
+  uint64_t usedSize() override;
+  uint64_t totalSize() override;
+  bool mediaPresent() override;
+  const char * name() override; // this currently returns the "product" name of the underlying USB mass storage device
 
   USB_FAT_Volume()  = default;
   ~USB_FAT_Volume() { unmount(); }

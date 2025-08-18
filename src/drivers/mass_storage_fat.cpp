@@ -188,6 +188,15 @@ bool USB_FAT_Volume::mediaPresent() {
   return false;
 }
 
+// maybe this should return the FAT volume label instead?
+const char* USB_FAT_Volume::name() {
+  if (mediaPresent()) {
+    return usbms->product_name(lun);
+  }
+
+  return "USB Drive (Empty)";
+}
+
 bool USB_FAT_Volume::mount(USB_Storage* usb, uint8_t LUN, uint32_t firstSector, uint32_t numSectors) {
   unmount();
   if (numSectors == 0) return false;
