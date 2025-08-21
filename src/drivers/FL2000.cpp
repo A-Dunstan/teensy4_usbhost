@@ -63,6 +63,7 @@ static const struct mode_timing vid_modes[] PROGMEM = {
   {  512,    384,     60,      672,     80,     68,   806,     3,      29,   1,   13,  4,  VIDMODE_FLAG_LINEDOUBLE},
   {  512,    480,     60,      672,     80,     68,   525,     2,      33,   2,  127,  30, 0},
   {  640,    350,     70,      800,     96,     48,   449,     2,      60,   1,   73,  29, VIDMODE_FLAG_HSYNC_POS},
+  {  640,    200,     70,      800,     96,     48,   449,     2,      35,   1,   73,  29, VIDMODE_FLAG_LINEDOUBLE|VIDMODE_FLAG_VSYNC_POS},
   {  640,    400,     70,      800,     96,     48,   449,     2,      35,   1,   73,  29, VIDMODE_FLAG_VSYNC_POS},
   {  640,    480,     60,      800,     96,     48,   525,     2,      33,   1,   73,  29, 0},
   {  720,    400,     70,      900,     108,    56,   449,     2,      32,   1,   17,  6,  VIDMODE_FLAG_VSYNC_POS},
