@@ -69,6 +69,8 @@ class FL2000 : public USB_Driver, public USB_Driver::Factory {
 friend class FL2000DMA;
 private:
   uint8_t bulk_data[2][FL2000_SLICE_SIZE] __attribute__((aligned(32)));
+  uint8_t intr_data[32] __attribute__((aligned(32)));
+  uint32_t reg_data[8] __attribute__((aligned(32)));
 
   struct threadMsg;
 
@@ -89,22 +91,21 @@ private:
   mode_timing current_mode;
 
   const uint8_t* current_fb;
-  const uint8_t* current_src;
   size_t current_pitch;
+  uint8_t current_fixed_bits;
   const uint8_t* next_fb;
   size_t next_pitch;
+  uint8_t next_fixed_bits;
+
+  const uint8_t* current_src;
   uint16_t next_line;
   uint16_t max_lines;
   uint32_t render_id;
   uint32_t output_bytes_per_pixel;
 
-  uint8_t intr_data[32] __attribute__((aligned(32)));
-  uint32_t reg_data[8] __attribute__((aligned(32)));
-
   struct DMARequest {
-    DMASetting line_begin;
-    DMASetting line_end0;
-    DMASetting line_end1;
+    DMASetting line_copy;
+    DMASetting line_count;
     std::function<void(void)> callback;
     struct DMARequest *next;
   };
@@ -168,7 +169,8 @@ public:
   int setFormat(const struct mode_timing& mode, int32_t input_format, int32_t output_format=COLOR_FORMAT_AUTO);
 
   // sets the next framebuffer to be rendered, must match the specified format
-  int setFrame(const void *fb, size_t pitch);
+  // fixedb specifies how many address bits (starting with the MSB) are fixed, for wraparound buffers
+  int setFrame(const void *fb, size_t pitch, uint8_t fixb=0);
 
   // sets one or more palette entries, 32-bit value = 0x00RRGGBB
   int setPalette(uint8_t index, size_t count, const uint32_t* colors);

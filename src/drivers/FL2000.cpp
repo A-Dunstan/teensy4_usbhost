@@ -88,6 +88,7 @@ struct mode_request : sync_request {
 struct frame_request : sync_request {
   const void *src;
   size_t pitch;
+  uint8_t fixed_bits;
 };
 
 struct pal_request : sync_request {
@@ -188,6 +189,7 @@ void FL2000::thread(void) {
             if (next_fb) {
               current_fb = next_fb;
               current_pitch = next_pitch;
+              current_fixed_bits = next_fixed_bits;
               next_fb = NULL;
             }
             status = frame_begin();
@@ -198,6 +200,7 @@ void FL2000::thread(void) {
         case CMD_SET_NEXT_FRAME:
           next_pitch = msg.frame_req->pitch;
           next_fb = (uint8_t*)msg.frame_req->src;
+          next_fixed_bits = msg.frame_req->fixed_bits;
           msg.frame_req->result = 0;
           atomSemPut(&msg.frame_req->sema);
           break;
@@ -634,10 +637,11 @@ int FL2000::forwardMsg(sync_request& req, threadMsg& msg) {
   return ret;
 }
 
-int FL2000::setFrame(const void *fb, size_t pitch) {
+int FL2000::setFrame(const void *fb, size_t pitch, uint8_t fixb) {
   frame_request req = {
     .src = fb,
     .pitch = pitch,
+    .fixed_bits = fixb,
   };
   threadMsg msg = {
     .cmd = CMD_SET_NEXT_FRAME,
@@ -731,8 +735,8 @@ private:
       next = head->next;
     } while (StoreExclusivePtr(next, &queue));
     if (next) {
-      ch1 = next->line_end0;
-      ch2 = next->line_begin;
+      ch1 = next->line_count;
+      ch2 = next->line_copy;
     }
     head->callback();
     atomIntExit(FALSE);
@@ -754,14 +758,14 @@ public:
   static void submit_request(DMARequest& req) {
     static oneTimeInit init;
 
-    // end of line_begin minor loop triggers ch2
-    FL2000DMA::ch2.triggerAtTransfersOf(req.line_begin);
-    // end of line_begin major loop triggers ch1
-    FL2000DMA::ch1.triggerAtCompletionOf(req.line_begin);
-    // end of line_end0 minor loop triggers ch2
-    FL2000DMA::ch2.triggerAtTransfersOf(req.line_end0);
-    // end of line_end1 minor loop triggers ch1
-    FL2000DMA::ch1.triggerAtTransfersOf(req.line_end1);
+    // end of line_copy minor loop triggers ch2
+    ch2.triggerAtTransfersOf(req.line_copy);
+    // end of line_copy major loop triggers ch1
+    ch1.triggerAtCompletionOf(req.line_copy);
+    // end of line_count minor loop triggers ch2
+    ch2.triggerAtTransfersOf(req.line_count);
+    // line_count writes to ch2 SADDR
+    req.line_count.TCD->DADDR = &ch2.TCD->SADDR;
 
     DMARequest** tail;
     do {
@@ -777,8 +781,8 @@ public:
     } while (StoreExclusivePtr(&req, tail));
 
     if (tail == &queue) {
-      ch1 = req.line_end0;
-      ch2 = req.line_begin;
+      ch1 = req.line_count;
+      ch2 = req.line_copy;
     }
   }
 };
@@ -791,6 +795,7 @@ void FL2000::convert_dma(slice_data* s, uint32_t height) {
   uint8_t* dst = s->data;
   uint32_t line_width = current_mode.active_width * output_bytes_per_pixel;
   uint32_t slice_size = height * line_width;
+  size_t offset_mask = 0xFFFFFFFF >> current_fixed_bits;
 
   if (current_src == NULL) {
     send_slice(s, slice_size);
@@ -811,73 +816,76 @@ void FL2000::convert_dma(slice_data* s, uint32_t height) {
     }
   };
 
-  auto TCDbegin = s->dma_req.line_begin.TCD;
-  auto TCDend0 = s->dma_req.line_end0.TCD;
-  auto TCDend1 = s->dma_req.line_end1.TCD;
+  auto TCDcopy = s->dma_req.line_copy.TCD;
+  auto TCDcount = s->dma_req.line_count.TCD;
 
   int16_t soff;
   uint8_t attr_src;
   size_t align = ((size_t)current_src | current_pitch) & 7;
   if (align & 1) {
     soff = 1;
-    attr_src = DMA_TCD_ATTR_SIZE_8BIT;
+    attr_src = DMA_TCD_ATTR_DSIZE(DMA_TCD_ATTR_SIZE_8BIT);
   } else if (align & 2) {
     soff = 2;
-    attr_src = DMA_TCD_ATTR_SIZE_16BIT;
+    attr_src = DMA_TCD_ATTR_DSIZE(DMA_TCD_ATTR_SIZE_16BIT);
   } else if (align & 4) {
     soff = 4;
-    attr_src = DMA_TCD_ATTR_SIZE_32BIT;
+    attr_src = DMA_TCD_ATTR_DSIZE(DMA_TCD_ATTR_SIZE_32BIT);
   } else {
     soff = 8;
-    attr_src = DMA_TCD_ATTR_SIZE_64BIT;
+    attr_src = DMA_TCD_ATTR_DSIZE(DMA_TCD_ATTR_SIZE_64BIT);
   }
+  attr_src |= DMA_TCD_ATTR_DMOD(32-current_fixed_bits);
 
-  // line_begin: copy all pixels of line except last 8 bytes
-  TCDbegin->SADDR = current_src;
-  TCDbegin->SOFF = soff;
-  TCDbegin->ATTR_SRC = attr_src;
-  TCDbegin->ATTR_DST = DMA_TCD_ATTR_SIZE_32BIT;
-  TCDbegin->NBYTES_MLOFFYES = DMA_TCD_NBYTES_DMLOE | DMA_TCD_NBYTES_MLOFFYES_MLOFF(16) | DMA_TCD_NBYTES_MLOFFYES_NBYTES(8);
-  TCDbegin->DADDR = dst + 4;
-  TCDbegin->DOFF = -4;
-  TCDbegin->SLAST = current_pitch - (line_width - 8);
-  TCDbegin->DLASTSGA = 16+8;
-  TCDbegin->CITER = TCDbegin->BITER = (line_width / 8) - 1;
-  TCDbegin->CSR = DMA_TCD_CSR_START;
+  // line_copy: minor loop = 8 bytes, major loop = 1 line
+  TCDcopy->SADDR = current_src;
+  TCDcopy->SOFF = soff;
+  TCDcopy->ATTR_SRC = attr_src;
+  TCDcopy->ATTR_DST = DMA_TCD_ATTR_DSIZE(DMA_TCD_ATTR_SIZE_32BIT);
+  TCDcopy->NBYTES_MLOFFYES = DMA_TCD_NBYTES_DMLOE | DMA_TCD_NBYTES_MLOFFYES_MLOFF(16) | DMA_TCD_NBYTES_MLOFFYES_NBYTES(8);
+  TCDcopy->DADDR = dst + 4;
+  TCDcopy->DOFF = -4;
+  TCDcopy->DLASTSGA = 16;
+  TCDcopy->CITER = TCDcopy->BITER = line_width / 8;
+  TCDcopy->CSR = DMA_TCD_CSR_START;
 
-  // line_end0: copy second last 4 or last 8 bytes per line
-  TCDend0->SADDR = current_src + line_width - 8;
-  TCDend0->ATTR_SRC = attr_src;
-  TCDend0->ATTR_DST = DMA_TCD_ATTR_SIZE_32BIT;
-  TCDend0->DADDR = dst + line_width - 4;
-  TCDend0->CITER = TCDend0->BITER = height;
-  if (align == 0) { // no need for end1
-    TCDend0->SOFF = current_pitch;
-    TCDend0->NBYTES_MLOFFYES = DMA_TCD_NBYTES_DMLOE | DMA_TCD_NBYTES_MLOFFYES_MLOFF(line_width + 8) | DMA_TCD_NBYTES_MLOFFYES_NBYTES(8);
-    TCDend0->DOFF = -4;
-    TCDend0->DLASTSGA = 0;
-    TCDend0->CSR = DMA_TCD_CSR_INTMAJOR;
+  /* line_count: minor loop = copy source pointer to line_copy TCD, major loop = height
+   * note this runs one extra loop - this is necessary because this channel runs after
+   * line_copy and it needs to trigger the interrupt when the major loop completes.
+   */
+  TCDcount->SADDR = dst+line_width;
+  TCDcount->SOFF = line_width;
+  TCDcount->ATTR_SRC = DMA_TCD_ATTR_SIZE_32BIT;
+  TCDcount->ATTR_DST = DMA_TCD_ATTR_SIZE_32BIT;
+  TCDcount->NBYTES_MLOFFNO = DMA_TCD_NBYTES_MLOFFNO_NBYTES(4);
+  TCDcount->DOFF = 0;
+  TCDcount->CITER = TCDcount->BITER = height;
+  TCDcount->CSR = DMA_TCD_CSR_INTMAJOR;
+
+  size_t offset = (size_t)current_src & offset_mask;
+  const uint8_t* src = current_src - offset;
+
+  size_t src_size = height * current_pitch;
+  size_t ov_size = src_size + offset - 1;
+  if (ov_size <= offset_mask) {
+    cache_flush(current_src, src_size);
   } else {
-    TCDend0->SOFF = TCDend1->SOFF = soff;
-    TCDend0->NBYTES_MLOFFYES = \
-    TCDend1->NBYTES_MLOFFYES = DMA_TCD_NBYTES_SMLOE | DMA_TCD_NBYTES_MLOFFYES_MLOFF(current_pitch - 4) | DMA_TCD_NBYTES_MLOFFYES_NBYTES(4);
-    TCDend0->DOFF = TCDend1->DOFF = line_width;
-    TCDend0->DLASTSGA = (int32_t)TCDend1;
-    TCDend0->CSR = DMA_TCD_CSR_ESG;
-
-    // line_end1: copy last 4 bytes per line
-    TCDend1->SADDR = current_src + line_width - 4;
-    TCDend1->ATTR_SRC = attr_src;
-    TCDend1->ATTR_DST = DMA_TCD_ATTR_SIZE_32BIT;
-    TCDend1->DADDR = dst + line_width - 8;
-    TCDend1->DLASTSGA = 0;
-    TCDend1->CITER = TCDend1->BITER = height;
-    TCDend1->CSR = DMA_TCD_CSR_INTMAJOR | DMA_TCD_CSR_START;
-    cache_flush(TCDend1, sizeof(*TCDend1));
+    ov_size -= offset_mask;
+    cache_flush(current_src, src_size - ov_size);
+    cache_flush(src, ov_size);
   }
 
-  cache_flush(current_src, height * current_pitch);
-  current_src += height * current_pitch;
+  // store pointers for each source line at the beginning of each destination line
+  auto p = (const void**)(dst + line_width);
+  for (uint32_t i = 1; i < height; i++) {
+    offset += current_pitch;
+    *p = src + (offset & offset_mask);
+    SCB_CACHE_DCCIMVAC = (uint32_t)p;
+    p += line_width / sizeof(p);
+  }
+  cache_sync();
+
+  current_src = src + ((offset + current_pitch) & offset_mask);
 
   FL2000DMA::submit_request(s->dma_req);
 }
