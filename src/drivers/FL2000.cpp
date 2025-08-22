@@ -894,22 +894,24 @@ void FL2000::convert_dma(slice_data* s, uint32_t height) {
 void FL2000::convert_rgb24_to_rgb8(slice_data* s, uint32_t height) {
   uint8_t* dst = s->data;
   uint32_t width = current_mode.active_width;
-  const uint8_t* src = current_src;
+  size_t offset_mask = 0xFFFFFFFF >> current_fixed_bits;
+  size_t offset = (size_t)current_src & offset_mask;
+  const uint8_t* src = current_src - offset;
 
-  if (src) {
+  if (current_src) {
     for (uint32_t i=0; i < height; i++) {
       for (size_t j=0; j < width; j++) {
-        uint8_t b = src[j*3+0] & 0xE0;
-        uint8_t g = src[j*3+1] & 0xE0;
-        uint8_t r = src[j*3+2] & 0xC0;
+        uint8_t b = src[offset++ & offset_mask] & 0xE0;
+        uint8_t g = src[offset++ & offset_mask] & 0xE0;
+        uint8_t r = src[offset++ & offset_mask] & 0xC0;
         dst[j ^ 4] = r | (g>>2) | (b>>5);
       }
 
-      src += current_pitch;
+      offset += current_pitch - width/3;
       dst += width;
     }
 
-    current_src = src;
+    current_src = src + (offset & offset_mask);
   }
 
   send_slice(s, height*width);
@@ -918,22 +920,25 @@ void FL2000::convert_rgb24_to_rgb8(slice_data* s, uint32_t height) {
 void FL2000::convert_rgb565_to_rgb8(slice_data *s, uint32_t height) {
   uint8_t* dst = s->data;
   uint32_t width = current_mode.active_width;
-  const uint8_t* src = current_src;
+  size_t offset_mask = 0xFFFFFFFF >> current_fixed_bits;
+  size_t offset = (size_t)current_src & offset_mask;
+  const uint8_t* src = current_src - offset;
 
-  if (src) {
+  if (current_src) {
     for (size_t i=0; i < height; i++) {
       for (size_t j=0; j < width; j++) {
-        uint8_t b = src[j*2+0] << 3;
-        uint8_t g = src[j*2+1] << 5;
-        uint8_t r = src[j*2+1] & 0xC0;
-        dst[j ^ 4] = r | (g>>2) | (b>>5);
+        uint8_t gb = src[offset++ & offset_mask] << 3;
+        uint8_t rg = src[offset++ & offset_mask];
+        uint8_t g = rg << 5;
+        uint8_t r = rg & 0xC0;
+        dst[j ^ 4] = r | (g>>2) | (gb>>5);
       }
 
-      src += current_pitch;
+      offset += current_pitch - width/2;
       dst += width;
     }
 
-    current_src = src;
+    current_src = src + (offset & offset_mask);
   }
 
   send_slice(s, height*width);
@@ -942,48 +947,57 @@ void FL2000::convert_rgb565_to_rgb8(slice_data *s, uint32_t height) {
 void FL2000::convert_rgb555_to_rgb8(slice_data *s, uint32_t height) {
   uint8_t* dst = s->data;
   uint32_t width = current_mode.active_width;
-  const uint8_t* src = current_src;
+  size_t offset_mask = 0xFFFFFFFF >> current_fixed_bits;
+  size_t offset = (size_t)current_src & offset_mask;
+  const uint8_t* src = current_src - offset;
 
-  if (src) {
+  if (current_src) {
     for (size_t i=0; i < height; i++) {
       for (size_t j=0; j < width; j++) {
-        uint8_t b = src[j*2+0] << 3;
-        uint8_t g = (src[j*2+1] << 4) | (src[j*2+0] >> 4);
-        uint8_t r = src[j*2+1] >> 5;
+        uint8_t gb = src[offset++ & offset_mask];
+        uint8_t rg = src[offset++ & offset_mask];
+        uint8_t b = gb << 3;
+        uint8_t g = (rg << 4) | (gb >> 4);
+        uint8_t r = rg >> 5;
         dst[j ^ 4] = (r<<6) | (g&0x38) | (b>>5);
       }
 
-      src += current_pitch;
+      offset += current_pitch - width/2;
       dst += width;
     }
 
-    current_src = src;
+    current_src = src + (offset & offset_mask);
   }
 
   send_slice(s, height*width);
 }
 
 void FL2000::convert_copy(slice_data *slice, uint32_t height) {
-  uint8_t* dst = slice->data;
   uint32_t width = current_mode.active_width * output_bytes_per_pixel;
-  size_t pitch = current_pitch;
+  size_t offset_mask = 0xFFFFFFFF >> current_fixed_bits;
+  size_t offset = (size_t)current_src & offset_mask;
+  const uint8_t* src = current_src - offset;
+  uint32_t* dst = (uint32_t*)slice->data;
 
-  uint32_t* d = (uint32_t*)dst;
-  const uint32_t* s = (const uint32_t*)current_src;
-  uint32_t w = width / 4;
-  pitch /= 4;
-
-  if (s) {
+  if (current_src) {
     for (size_t i=0; i < height; i++) {
-      for (size_t j=0; j < w; j+=2) {
-        *d++ = s[j+1];
-        *d++ = s[j+0];
+      for (size_t j=0; j < width; j += 8) {
+        uint32_t b = src[offset++ & offset_mask] << 0;
+        b |= src[offset++ & offset_mask] << 8;
+        b |= src[offset++ & offset_mask] << 16;
+        b |= src[offset++ & offset_mask] << 24;
+        uint32_t a = src[offset++ & offset_mask] << 0;
+        a |= src[offset++ & offset_mask] << 8;
+        a |= src[offset++ & offset_mask] << 16;
+        a |= src[offset++ & offset_mask] << 24;
+        *dst++ = a;
+        *dst++ = b;
       }
 
-      s += pitch;
+      offset += current_pitch - width;
     }
 
-    current_src = (const uint8_t*)s;
+    current_src = src + (offset & offset_mask);
   }
 
   send_slice(slice, height*width);
