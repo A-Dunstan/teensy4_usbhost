@@ -21,7 +21,7 @@
 
 bool USBMouse::begin(ATOM_QUEUE *q) {
   if (q == NULL) return false;
-  /* this odd patten is to avoid a race condition
+  /* this odd pattern is to avoid a race condition
    * that could possibly call startPolling twice
    */
   if (attached && queue == NULL) {

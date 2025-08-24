@@ -17,7 +17,7 @@ static EventResponder monitor_responder;
  */
 void monitor_event(EventResponder& ev) {
   int status = ev.getStatus();
-  auto monitor = (FL2000*)ev.getData();
+  auto monitor = (FL2000*)ev.getContext();
 
   switch (status) {
     case MONITOR_NOTIFY_ERROR:

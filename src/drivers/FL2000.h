@@ -68,9 +68,9 @@ struct mode_timing {
 class FL2000 : public USB_Driver, public USB_Driver::Factory {
 friend class FL2000DMA;
 private:
-  uint8_t bulk_data[2][FL2000_SLICE_SIZE] __attribute__((aligned(32)));
-  uint8_t intr_data[32] __attribute__((aligned(32)));
   uint32_t reg_data[8] __attribute__((aligned(32)));
+  uint8_t intr_data[32] __attribute__((aligned(32)));
+  uint8_t bulk_data[2][FL2000_SLICE_SIZE] __attribute__((aligned(32)));
 
   struct threadMsg;
 
@@ -82,7 +82,7 @@ private:
 
   int dbg_log(const char* fmt, ...) const;
 
-  EventResponder *monitor_notify;
+  EventResponder *monitor_notify = NULL;
 
   bool monitor_plugged_in;
   bool has_ITE66121;
@@ -100,7 +100,7 @@ private:
   const uint8_t* current_src;
   uint16_t next_line;
   uint16_t max_lines;
-  uint32_t render_id;
+  uint32_t render_id = 0;
   uint32_t output_bytes_per_pixel;
 
   struct DMARequest {
@@ -115,7 +115,10 @@ private:
     DMARequest dma_req;
     std::vector<usb_bulkintr_sg> sg;
     bool last;
-  } slices[2];
+  } slices[2] = {
+    {bulk_data[0]},
+    {bulk_data[1]}
+  };
 
   int reg_write(uint16_t offset, const uint32_t val);
   int reg_read(uint16_t offset, uint32_t& val);

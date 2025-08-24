@@ -558,7 +558,7 @@ FLASHMEM int FL2000::process_interrupt(void) {
       monitor_plugged_in = true;
 
       if (monitor_notify)
-        monitor_notify->triggerEvent(MONITOR_NOTIFY_CONNECTED, this);
+        monitor_notify->triggerEvent(MONITOR_NOTIFY_CONNECTED);
     }
   } else {
     if (monitor_plugged_in) {
@@ -566,7 +566,7 @@ FLASHMEM int FL2000::process_interrupt(void) {
       reg_set(0x0078, 1<<17);
 
       if (monitor_notify)
-        monitor_notify->triggerEvent(MONITOR_NOTIFY_DISCONNECTED, this);
+        monitor_notify->triggerEvent(MONITOR_NOTIFY_DISCONNECTED);
     }
   }
 
@@ -593,11 +593,7 @@ FLASHMEM void FL2000::detach(void) {
   atomQueuePut(&workQueue, 10, &msg);
 }
 
-FLASHMEM FL2000::FL2000() :
-slices{{bulk_data[0]}, {bulk_data[1]}}
-{
-  monitor_notify = NULL;
-  render_id = 0;
+FLASHMEM FL2000::FL2000() {
   atomThreadCreate(&workThread, 80, threadStart, (uint32_t)this, workStack, sizeof(workStack), 0);
 }
 
@@ -611,6 +607,7 @@ FLASHMEM FL2000::~FL2000() {
 FLASHMEM EventResponder* FL2000::set_monitor_event(EventResponder* event_hook) {
   EventResponder* old = monitor_notify;
   monitor_notify = event_hook;
+  monitor_notify->setContext(this);
   return old;
 }
 
@@ -741,7 +738,6 @@ private:
     }
     head->callback();
     atomIntExit(FALSE);
-    asm volatile("dsb");
   }
 
   struct oneTimeInit {
@@ -759,7 +755,7 @@ public:
   static void submit_request(DMARequest& req) {
     static oneTimeInit init;
 
-    // end of line_copy minor loop triggers ch2
+    // end of line_copy minor loop self-triggers ch2
     ch2.triggerAtTransfersOf(req.line_copy);
     // end of line_copy major loop triggers ch1
     ch1.triggerAtCompletionOf(req.line_copy);
@@ -825,16 +821,16 @@ void FL2000::convert_dma(slice_data* s, uint32_t height) {
   size_t align = ((size_t)current_src | current_pitch) & 7;
   if (align & 1) {
     soff = 1;
-    attr_src = DMA_TCD_ATTR_DSIZE(DMA_TCD_ATTR_SIZE_8BIT);
+    attr_src = DMA_TCD_ATTR_SIZE_8BIT;
   } else if (align & 2) {
     soff = 2;
-    attr_src = DMA_TCD_ATTR_DSIZE(DMA_TCD_ATTR_SIZE_16BIT);
+    attr_src = DMA_TCD_ATTR_SIZE_16BIT;
   } else if (align & 4) {
     soff = 4;
-    attr_src = DMA_TCD_ATTR_DSIZE(DMA_TCD_ATTR_SIZE_32BIT);
+    attr_src = DMA_TCD_ATTR_SIZE_32BIT;
   } else {
     soff = 8;
-    attr_src = DMA_TCD_ATTR_DSIZE(DMA_TCD_ATTR_SIZE_64BIT);
+    attr_src = DMA_TCD_ATTR_SIZE_64BIT;
   }
   attr_src |= DMA_TCD_ATTR_DMOD(32-current_fixed_bits);
 
@@ -842,7 +838,7 @@ void FL2000::convert_dma(slice_data* s, uint32_t height) {
   TCDcopy->SADDR = current_src;
   TCDcopy->SOFF = soff;
   TCDcopy->ATTR_SRC = attr_src;
-  TCDcopy->ATTR_DST = DMA_TCD_ATTR_DSIZE(DMA_TCD_ATTR_SIZE_32BIT);
+  TCDcopy->ATTR_DST = DMA_TCD_ATTR_SIZE_32BIT;
   TCDcopy->NBYTES_MLOFFYES = DMA_TCD_NBYTES_DMLOE | DMA_TCD_NBYTES_MLOFFYES_MLOFF(16) | DMA_TCD_NBYTES_MLOFFYES_NBYTES(8);
   TCDcopy->DADDR = dst + 4;
   TCDcopy->DOFF = -4;
@@ -882,7 +878,7 @@ void FL2000::convert_dma(slice_data* s, uint32_t height) {
     offset += current_pitch;
     *p = src + (offset & offset_mask);
     SCB_CACHE_DCCIMVAC = (uint32_t)p;
-    p += line_width / sizeof(p);
+    p += line_width / sizeof(*p);
   }
   cache_sync();
 
@@ -1430,7 +1426,7 @@ void FL2000::send_slice(slice_data *slice, size_t slice_len) {
      * since that command begins the processing of the next frame.
      */
     if (monitor_notify)
-      monitor_notify->triggerEvent(MONITOR_NOTIFY_FRAMEDONE, this);
+      monitor_notify->triggerEvent(MONITOR_NOTIFY_FRAMEDONE, (void*)current_src);
 
     auto zlp_cb = [=](int r) {
       if (r >= 0) {
