@@ -193,12 +193,6 @@ void FL2000::thread(void) {
           break;
         case CMD_FRAME_DONE:
           if (msg.slice.id == render_id) {
-            if (next_fb) {
-              current_fb = next_fb;
-              current_pitch = next_pitch;
-              current_fixed_bits = next_fixed_bits;
-              next_fb = NULL;
-            }
             status = frame_begin();
           } else {
             dbg_log("frame render_id mismatch");
@@ -208,7 +202,7 @@ void FL2000::thread(void) {
           next_pitch = msg.frame_req->pitch;
           next_fb = (uint8_t*)msg.frame_req->src;
           next_fixed_bits = msg.frame_req->fixed_bits;
-          msg.frame_req->result = 0;
+          msg.frame_req->result = (current_fb == NULL) ? frame_begin() : 0;
           atomSemPut(&msg.frame_req->sema);
           break;
         case CMD_SET_PALETTE:
@@ -490,14 +484,15 @@ FLASHMEM int FL2000::device_init(void) {
   vga_c.ext_mon_int_en = 1;
   vga_c.vga_status_self_clear_dis = 0;
   vga_c.feedback_int_en = 0;
+  vga_c.standby_en = 1;
   vga_c.force_loopback = 0;
   vga_c.biac_en = 0;
-  vga_c.vga_err_int_en = 0;
   vga_c.use_zero_td = 0;
   vga_c.use_zero_pkt_len = 1;
   vga_c.use_pkt_pending = 0;
 
   vga_c.lbuf_drop_frame_en = 0;
+  vga_c.lbuf_vde_rst_en = 1;
   vga_c.lbuf_err_int_en = 1;
   vga_c.vga_err_int_en = 1;
 
@@ -1162,10 +1157,6 @@ FLASHMEM int FL2000::set_mode(const struct mode_timing& mode, int32_t input_form
     return -EIO;
   }
 
-  reg_vga_control vga_ctrl = { .lbuf_vde_rst_en = 1 };
-  ret = reg_clear(REG_VGA_CONTROL, vga_ctrl.val);
-  if (ret < 0) return ret;
-
   reg_vga_dac_control dac_ctrl;
   ret = reg_read(REG_VGA_DAC_CONTROL, dac_ctrl.val);
   if (ret < 0) return ret;
@@ -1181,6 +1172,7 @@ FLASHMEM int FL2000::set_mode(const struct mode_timing& mode, int32_t input_form
   dac_ctrl.first_bt_enc_en = 0;
   dac_ctrl.clear_watermark = 1;
   dac_ctrl.dac_output_en = 1;
+  dac_ctrl.timing_en = 1;
   switch (output) {
     case COLOR_FORMAT_RGB_8_INDEXED:
       dac_ctrl.color_palette_en = 1;
@@ -1338,13 +1330,46 @@ FLASHMEM int FL2000::hdmi_init(void) {
 }
 
 int FL2000::frame_begin(void) {
+  const reg_vga_control standby_ctrl = {
+    .standby_en = 1,
+    .lbuf_vde_rst_en = 1
+  };
+
+  if (next_fb) {
+    if (current_fb == NULL) {
+      // disable standby
+      int ret;
+
+      if (has_ITE66121) {
+        ret = i2c_write_byte_masked(I2C_ADDRESS_HDMI, ITE_REG_AFE_DRV, 0, ITE_REG_AFE_DRV_RST);
+        if (ret < 0) return ret;
+      }
+
+      ret = reg_clear(REG_VGA_CONTROL, standby_ctrl.val);
+      if (ret < 0) return ret;
+    }
+    current_fb = next_fb;
+    current_pitch = next_pitch;
+    current_fixed_bits = next_fixed_bits;
+  } else {
+    if (current_fb) {
+      current_fb = NULL;
+      // activate standby
+      int ret;
+
+      if (has_ITE66121) {
+        ret = i2c_write_byte_masked(I2C_ADDRESS_HDMI, ITE_REG_AFE_DRV, ITE_REG_AFE_DRV_RST, ITE_REG_AFE_DRV_RST);
+        if (ret < 0) return ret;
+      }
+
+      ret = reg_set(REG_VGA_CONTROL, standby_ctrl.val);
+      if (ret < 0) return ret;
+    }
+    return 0;
+  }
+
   current_src = current_fb;
   next_line = 0;
-
-  if (current_src == NULL) {
-    memset(slices[0].data, 0, FL2000_SLICE_SIZE);
-    memset(slices[1].data, 0, FL2000_SLICE_SIZE);
-  }
 
   begin_slice(slices+0);
   if (next_line < max_lines)

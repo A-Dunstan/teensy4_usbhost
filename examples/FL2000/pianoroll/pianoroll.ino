@@ -65,6 +65,7 @@ void monitor_event(EventResponder& ev) {
       Serial.printf("Monitor %p was connected\n", monitor);
       Serial.printf("setFormat (%ux%u@%uHz) result: %d\n", WIDTH, HEIGHT, FREQ, monitor->setFormat(WIDTH, HEIGHT, FREQ, COLOR_FORMAT));
       setPalette(monitor);
+      monitor->setFrame(fb, WIDTH);
       break;
     case MONITOR_NOTIFY_FRAMEDONE:
       if (!paused) {
