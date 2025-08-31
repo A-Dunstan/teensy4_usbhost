@@ -151,6 +151,8 @@ private:
 
   int forwardMsg(struct sync_request& req, threadMsg& msg);
 
+  void convert_dma_init(slice_data *slice);
+
   void (FL2000::*convert_slice)(slice_data* slice, uint32_t height);
   void convert_rgb24_to_rgb8(slice_data*,uint32_t);
   void convert_rgb565_to_rgb8(slice_data*,uint32_t);

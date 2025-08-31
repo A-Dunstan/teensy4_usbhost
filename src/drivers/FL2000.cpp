@@ -794,6 +794,35 @@ FL2000DMA::DMARequest* FL2000DMA::queue;
 DMAChannel FL2000DMA::ch1(false);
 DMAChannel FL2000DMA::ch2(false);
 
+void FL2000::convert_dma_init(slice_data *s) {
+  uint8_t* dst = s->data;
+  uint32_t line_width = current_mode.active_width * output_bytes_per_pixel;
+
+  auto TCDcopy = s->dma_req.line_copy.TCD;
+  auto TCDcount = s->dma_req.line_count.TCD;
+
+  // line_copy: minor loop = 8 bytes, major loop = 1 line
+  TCDcopy->ATTR_DST = DMA_TCD_ATTR_SIZE_32BIT;
+  TCDcopy->NBYTES_MLOFFYES = DMA_TCD_NBYTES_DMLOE | DMA_TCD_NBYTES_MLOFFYES_MLOFF(16) | DMA_TCD_NBYTES_MLOFFYES_NBYTES(8);
+  TCDcopy->DADDR = dst + 4;
+  TCDcopy->DOFF = -4;
+  TCDcopy->DLASTSGA = 16;
+  TCDcopy->BITER = line_width / 8;
+  TCDcopy->CSR = DMA_TCD_CSR_START;
+
+  /* line_count: minor loop = copy source pointer to line_copy TCD, major loop = height
+   * note this runs one extra loop - this is necessary because this channel runs after
+   * line_copy and it needs to trigger the interrupt when the major loop completes.
+   */
+  TCDcount->SADDR = dst+line_width;
+  TCDcount->SOFF = line_width;
+  TCDcount->ATTR_SRC = DMA_TCD_ATTR_SIZE_32BIT;
+  TCDcount->ATTR_DST = DMA_TCD_ATTR_SIZE_32BIT;
+  TCDcount->NBYTES_MLOFFNO = DMA_TCD_NBYTES_MLOFFNO_NBYTES(4);
+  TCDcount->DOFF = 0;
+  TCDcount->CSR = DMA_TCD_CSR_INTMAJOR;
+}
+
 void FL2000::convert_dma(slice_data* s, uint32_t height) {
   uint8_t* dst = s->data;
   uint32_t line_width = current_mode.active_width * output_bytes_per_pixel;
@@ -840,30 +869,11 @@ void FL2000::convert_dma(slice_data* s, uint32_t height) {
   }
   attr_src |= DMA_TCD_ATTR_DMOD(32-current_fixed_bits);
 
-  // line_copy: minor loop = 8 bytes, major loop = 1 line
   TCDcopy->SADDR = current_src;
   TCDcopy->SOFF = soff;
   TCDcopy->ATTR_SRC = attr_src;
-  TCDcopy->ATTR_DST = DMA_TCD_ATTR_SIZE_32BIT;
-  TCDcopy->NBYTES_MLOFFYES = DMA_TCD_NBYTES_DMLOE | DMA_TCD_NBYTES_MLOFFYES_MLOFF(16) | DMA_TCD_NBYTES_MLOFFYES_NBYTES(8);
-  TCDcopy->DADDR = dst + 4;
-  TCDcopy->DOFF = -4;
-  TCDcopy->DLASTSGA = 16;
-  TCDcopy->CITER = TCDcopy->BITER = line_width / 8;
-  TCDcopy->CSR = DMA_TCD_CSR_START;
 
-  /* line_count: minor loop = copy source pointer to line_copy TCD, major loop = height
-   * note this runs one extra loop - this is necessary because this channel runs after
-   * line_copy and it needs to trigger the interrupt when the major loop completes.
-   */
-  TCDcount->SADDR = dst+line_width;
-  TCDcount->SOFF = line_width;
-  TCDcount->ATTR_SRC = DMA_TCD_ATTR_SIZE_32BIT;
-  TCDcount->ATTR_DST = DMA_TCD_ATTR_SIZE_32BIT;
-  TCDcount->NBYTES_MLOFFNO = DMA_TCD_NBYTES_MLOFFNO_NBYTES(4);
-  TCDcount->DOFF = 0;
-  TCDcount->CITER = TCDcount->BITER = height;
-  TCDcount->CSR = DMA_TCD_CSR_INTMAJOR;
+  TCDcount->BITER = height;
 
   size_t offset = (size_t)current_src & offset_mask;
   const uint8_t* src = current_src - offset;
@@ -1228,9 +1238,13 @@ FLASHMEM int FL2000::set_mode(const struct mode_timing& mode, int32_t input_form
     dbg_log("hdmi_init complete");
   }
 
-  // any cached data here is unneeded, throw it out
-  cache_invalidate(slices[0].data, FL2000_SLICE_SIZE);
-  cache_invalidate(slices[1].data, FL2000_SLICE_SIZE);
+  if (convert_slice == &FL2000::convert_dma) {
+    convert_dma_init(slices+0);
+    convert_dma_init(slices+1);
+    // any cached data here is unneeded, throw it out
+    cache_invalidate(slices[0].data, FL2000_SLICE_SIZE);
+    cache_invalidate(slices[1].data, FL2000_SLICE_SIZE);
+  }
 
   return frame_begin();
 }
