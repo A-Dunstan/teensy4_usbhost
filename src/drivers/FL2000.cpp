@@ -164,6 +164,12 @@ void FL2000::thread(void) {
           break;
         case CMD_DETACH:
           dbg_log("Detach msg");
+          if (monitor_plugged_in) {
+            monitor_plugged_in = false;
+
+            if (monitor_notify)
+              monitor_notify->triggerEvent(MONITOR_NOTIFY_DISCONNECTED);
+          }
           break;
         case CMD_SET_MODE:
           dbg_log("set mode msg");
@@ -519,7 +525,7 @@ FLASHMEM int FL2000::process_interrupt(void) {
   reg_vga_status status;
   ret = reg_read(REG_VGA_STATUS, status.val);
   if (ret < 0) return ret;
-  dbg_log("vga_status register: %08X", status.val);
+  dbg_log("vga_status register: %08X (%d)", status.val, status.framecount);
   if (status.vga_status) {
     if (!monitor_plugged_in) {
       reg_clear(0x0078, 1<<17);
