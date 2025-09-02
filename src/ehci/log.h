@@ -23,7 +23,7 @@
 #include "config.h"
 
 #if defined(LOGGING) && (LOGGING == 1)
-#define dprintf(fmt, ...) ::printf(fmt __VA_OPT__(,) __VA_ARGS__)
+#define dprintf(fmt, ...) ::fprintf(stderr, fmt __VA_OPT__(,) __VA_ARGS__)
 #else
 #define dprintf(...)
 #endif

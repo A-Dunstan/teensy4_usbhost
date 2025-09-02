@@ -250,7 +250,7 @@ int FL2000::dbg_log(const char* fmt, ...) const {
   va_start(args, fmt);
   int j = vfprintf(stderr, fmt, args);
   va_end(args);
-  putchar('\n');
+  fputc('\n', stderr);
 
   if (i >= 0) {
     if (j < 0)
@@ -839,7 +839,6 @@ void FL2000::convert_dma(slice_data* s, uint32_t height) {
     };
     if (atomQueuePut(&workQueue, -1, &msg) != ATOM_OK) {
       dbg_log("Failed to send CMD_SEND_SLICE");
-      digitalWriteFast(13, 1);
     }
   };
 
