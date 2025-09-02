@@ -308,25 +308,21 @@ FLASHMEM int FL2000::reg_clear(uint16_t offset, const uint32_t val) {
 }
 
 FLASHMEM int FL2000::i2c_transfer(uint8_t address, uint8_t offset, bool read) {
-  reg_i2c_control ctrl;
+  reg_i2c_control ctrl = {
+    .address = address,
+    .read = read ? 1u:0u,
+    .offset = offset,
+    .monitor_detect = 1,
+    .edid_detect = 1,
+  };
 
-  int ret = reg_read(REG_I2C_CONTROL, ctrl.val);
+  int ret = reg_write(REG_I2C_CONTROL, ctrl.val);
   if (ret < 0)
     return ret;
 
-  ctrl.monitor_detect = 1;
-  ctrl.address = address;
-  ctrl.cmd = read ? 1:0;
-  ctrl.offset = offset;
-  ctrl.spi = 0;
-  ctrl.spi_erase = 0;
-  ctrl.complete = 0;
-  ret = reg_write(REG_I2C_CONTROL, ctrl.val);
-  if (ret < 0)
-    return ret;
-
-  delay(3);
+  atomTimerDelay(SYSTEM_TICKS_PER_SEC/50);
   int retry;
+  elapsedMillis timer;
   for (retry=0; retry < I2C_RETRY_MAX; retry++) {
     ret = reg_read(REG_I2C_CONTROL, ctrl.val);
     if (ret < 0)
@@ -335,15 +331,15 @@ FLASHMEM int FL2000::i2c_transfer(uint8_t address, uint8_t offset, bool read) {
     if (ctrl.complete)
       break;
 
-    atomTimerDelay(1);
+    while (timer < 2);
+    timer -= 2;
   }
-  if (retry >= I2C_RETRY_MAX || ctrl.status!=0) {
-    dbg_log("i2c_transfer failed for address/offset %02X:%02X (%s)", address, offset, (read ? "read" : "write"));
-    errno = EIO;
-    return -1;
-  }
+  if (retry < I2C_RETRY_MAX && ctrl.status==0)
+    return 0;
 
-  return 0;
+  errno = (ctrl.status) ? EIO : ETIMEDOUT;
+  dbg_log("i2c_transfer failed for address/offset %02X:%02X (%s), %s", address, offset, (read ? "read":"write"), strerror(errno));
+  return -1;
 }
 
 FLASHMEM int FL2000::i2c_read_dword(uint8_t address, uint8_t offset, uint32_t& val) {

@@ -153,7 +153,7 @@ typedef union {
 typedef union {
   struct {
     uint32_t address         :7;
-    uint32_t cmd             :1;  // 1=READ, 0=WRITE
+    uint32_t read            :1;  // 1=READ, 0=WRITE
     uint32_t offset          :8;
     uint32_t spi             :1;  // 1=SPI, 0=EEPROM
     uint32_t spi_erase       :1;
