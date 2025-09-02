@@ -78,6 +78,8 @@ void monitor_event(EventResponder& ev) {
         atomSemPut(&frame_done);
       }
       break;
+    case MONITOR_NOTIFY_EDID:
+      break;
     default:
       Serial.printf("Unknown monitor %p event: %d\n", monitor, status);
   }

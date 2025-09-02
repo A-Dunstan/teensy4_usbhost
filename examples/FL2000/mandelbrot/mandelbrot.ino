@@ -46,6 +46,8 @@ void monitor_event(EventResponder& ev) {
         framecount = 0;
       }
       break;
+    case MONITOR_NOTIFY_EDID:
+      break;
     default:
       Serial.printf("Unknown monitor %p event: %d\n", monitor, status);
   }

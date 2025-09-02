@@ -24,10 +24,27 @@
 #include <DMAChannel.h>
 #include <vector>
 
-#define MONITOR_NOTIFY_ERROR         -1
-#define MONITOR_NOTIFY_DISCONNECTED  0
-#define MONITOR_NOTIFY_CONNECTED     1
-#define MONITOR_NOTIFY_FRAMEDONE     2
+enum notify_status {
+  /* something went wrong (e.g. device unplugged, communication error)
+   * assume device is unusable after this. */
+  MONITOR_NOTIFY_ERROR = -1,
+  /* For VGA ports, the device seems to detect the presence of a connected
+   * monitor by weak-pulling up a ground pin and detecting when it goes low.
+   * This isn't 100% reliable since some cables connect all their ground pins
+   * together in the plug, rather than passing them through to a connected monitor.
+   * In other words this may only detect a connected cable rather than a VGA screen. */
+  MONITOR_NOTIFY_DISCONNECTED,
+  MONITOR_NOTIFY_CONNECTED,
+  /* This notifies when the previous frame has been completely passed to the device.
+   * The source address of the retired frame is the data for the event. */
+  MONITOR_NOTIFY_FRAMEDONE,
+  /* This notifies when the device detects a change in EDID information. This can be
+   * a somewhat more reliable indicator of a VGA screen being (dis)connected, assuming
+   * the monitor supports EDID/DDC in the first place.
+   * Data for the event: a pointer to 128 bytes (page 0) of the new EDID, else NULL if
+   * EDID is not available. */
+  MONITOR_NOTIFY_EDID,
+};
 
 #define COLOR_FORMAT_AUTO            -1
 #define COLOR_FORMAT_RGB_24          0
