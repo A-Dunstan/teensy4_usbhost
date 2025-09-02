@@ -87,7 +87,6 @@ friend class FL2000DMA;
 private:
   uint32_t reg_data[8] __attribute__((aligned(32)));
   uint8_t intr_data[32] __attribute__((aligned(32)));
-  uint8_t bulk_data[2][FL2000_SLICE_SIZE] __attribute__((aligned(32)));
 
   struct threadMsg;
 
@@ -103,7 +102,7 @@ private:
 
   bool monitor_plugged_in;
   bool has_ITE66121;
-  uint8_t edid[128];
+  uint8_t edid[128] = {0};
 
   mode_timing current_mode;
 
@@ -136,6 +135,8 @@ private:
     {bulk_data[0]},
     {bulk_data[1]}
   };
+
+  uint8_t bulk_data[2][FL2000_SLICE_SIZE] __attribute__((aligned(32)));
 
   int reg_write(uint16_t offset, const uint32_t val);
   int reg_read(uint16_t offset, uint32_t& val);
@@ -177,6 +178,10 @@ private:
   void convert_copy(slice_data*,uint32_t);
   void convert_dma(slice_data*,uint32_t);
 
+  int hdmi_read_edid(uint8_t block, uint8_t* dst);
+  int dsub_read_edid(uint8_t block, uint8_t* dst);
+  void update_edid(void);
+
 public:
   FL2000();
   ~FL2000();
@@ -196,6 +201,9 @@ public:
 
   // sets one or more palette entries, 32-bit value = 0x00RRGGBB
   int setPalette(uint8_t index, size_t count, const uint32_t* colors);
+
+  // fetches 128 bytes of EDID data, from the given block
+  int fetchEDID(int block, uint8_t *edid_data);
 
   // helper function to find PLL parameters for specific frequencies
   static int calcTiming(const uint32_t freq, uint8_t& prescaler, uint8_t& mult, uint8_t& divisor);

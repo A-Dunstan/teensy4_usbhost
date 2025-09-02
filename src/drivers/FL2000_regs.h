@@ -45,8 +45,8 @@ typedef union {
     uint32_t irq_pending       :1;  /* self-clearing */
     uint32_t pll_status        :1;
     uint32_t dac_status        :1;
-    uint32_t linebuf_underflow :1;
-    uint32_t linebuf_overflow  :1;
+    uint32_t linebuf_empty     :1;  /* originally: linebuf_underflow */
+    uint32_t linebuf_full      :1;  /* originally: linebuf_overflow */
     uint32_t framecount        :16;
     uint32_t hdmi_int          :1;  /* self-clearing */
     uint32_t hdmi_status       :1;
@@ -278,6 +278,9 @@ typedef union {
 #define ITE_REG_INT_CTRL       0x05
 #define ITE_REG_INT_CTRL_TXCLK           (1<<0)
 
+#define ITE_REG_INT_STAT1      0x06
+#define ITE_REG_INT_STAT1_DDC_HANG       (1<<2)
+
 #define ITE_REG_GATE_BANK_CTRL 0x0F
 #define ITE_REG_GATE_BANK_CTRL_BANK      (3<<0)
 #define ITE_REG_GATE_BANK_CTRL_BANK_0    (0<<0)
@@ -287,6 +290,47 @@ typedef union {
 #define ITE_REG_GATE_BANK_CTRL_IACLK     (1<<5)
 #define ITE_REG_GATE_BANK_CTRL_RCLK      (1<<6)
 #define ITE_REG_GATE_BANK_CTRL_GATE_ALL  (ITE_REG_GATE_BANK_CTRL_CRCLK | ITE_REG_GATE_BANK_CTRL_TXCLK | ITE_REG_GATE_BANK_CTRL_IACLK | ITE_REG_GATE_BANK_CTRL_RCLK)
+
+#define ITE_REG_DDC_MASTER_SEL 0x10
+#define ITE_REG_DDC_MASTER_SEL_HDCP      0
+#define ITE_REG_DDC_MASTER_SEL_ROM       1
+
+#define ITE_REG_DDC_HEADER     0x11
+#define ITE_REG_DDC_HEADER_HDCP          0x74
+#define ITE_REG_DDC_HEADER_EDID          0xA0
+
+#define ITE_REG_DDC_REQ_OFFSET 0x12
+#define ITE_REG_DDC_REQ_BYTE   0x13
+#define ITE_REG_DDC_REQ_SEG    0x14
+
+#define ITE_REG_DDC_CMD        0x15
+#define ITE_REG_DDC_CMD_REQ              (15<<0)
+#define ITE_REG_DDC_CMD_REQ_BURST        (0<<0)
+#define ITE_REG_DDC_CMD_REQ_EDID         (3<<0)
+#define ITE_REG_DDC_CMD_REQ_FIFOCLR      (9<<0)
+#define ITE_REG_DDC_CMD_REQ_SCLPULSE     (10<<0)
+#define ITE_REG_DDC_CMD_REQ_ABORT        (15<<0)
+// data line status - read-only
+#define ITE_REG_DDC_CMD_DDC_SDA          (1<<7)
+#define ITE_REG_DDC_CMD_DDC_SCL          (1<<6)
+#define ITE_REG_DDC_CMD_ROM_SDA          (1<<5)
+#define ITE_REG_DDC_CMD_ROM_SCL          (1<<4)
+
+// DDC status is read-only
+#define ITE_REG_DDC_STATUS     0x16
+#define ITE_REG_DDC_STATUS_DONE          (1<<7)
+#define ITE_REG_DDC_STATUS_ACTIVE        (1<<6)
+#define ITE_REG_DDC_STATUS_NOACK         (1<<5)
+#define ITE_REG_DDC_STATUS_WAITBUS       (1<<4)
+#define ITE_REG_DDC_STATUS_ARBILOSE      (1<<3)
+#define ITE_REG_DDC_STATUS_ERROR         (ITE_REG_DDC_STATUS_NOACK | ITE_REG_DDC_STATUS_WAITBUS | ITE_REG_DDC_STATUS_ARBILOSE)
+#define ITE_REG_DDC_STATUS_FIFOFULL      (1<<2)
+#define ITE_REG_DDC_STATUS_FIFOEMPTY     (1<<1)
+
+#define ITE_REG_DDC_FIFO       0x17
+
+#define ITE_REG_HDCP_FEATURE   0x20
+#define ITE_REG_HDCP_FEATURE_CPDESIRED   (1<<0)
 
 #define ITE_REG_CLOCK59        0x59
 #define ITE_REG_CLOCK59_MANUALPLLPR      (3<<6)

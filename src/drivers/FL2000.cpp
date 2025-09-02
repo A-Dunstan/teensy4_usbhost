@@ -31,8 +31,10 @@
 
 #define I2C_RETRY_MAX           10
 
+#define I2C_ADDRESS_SEGMENT     0x30 // E-DDC segment index
+#define I2C_ADDRESS_DDC_CI      0x37
 #define I2C_ADDRESS_HDMI        0x4C
-#define I2C_ADDRESS_DSUB        0x50
+#define I2C_ADDRESS_EDID        0x50
 
 template <class Ex>
 Ex* LoadExclusivePtr(Ex** ptr) {
@@ -510,6 +512,143 @@ FLASHMEM int FL2000::device_init(void) {
   return ret;
 }
 
+// Reading EDID over HDMI sucks, talking to the encoder over buggy I2C is very slow...
+FLASHMEM int FL2000::hdmi_read_edid(uint8_t block, uint8_t* dst) {
+  // EDID initialization
+  int ret = i2c_write_byte(I2C_ADDRESS_HDMI, ITE_REG_DDC_MASTER_SEL, ITE_REG_DDC_MASTER_SEL_ROM);
+  if (ret < 0) return ret;
+
+  uint8_t val;
+  ret = i2c_read_byte(I2C_ADDRESS_HDMI, ITE_REG_INT_STAT1, val);
+  if (ret < 0) return ret;
+  if (val & ITE_REG_INT_STAT1_DDC_HANG) {
+    // DDC is stuck, need to reset it
+    // disable HDCP if it somehow activated
+    ret = i2c_write_byte_masked(I2C_ADDRESS_HDMI, ITE_REG_HDCP_FEATURE, 0, ITE_REG_HDCP_FEATURE_CPDESIRED);
+    if (ret < 0) return ret;
+    // now reset HDCP TX
+    ret = i2c_write_byte_masked(I2C_ADDRESS_HDMI, ITE_REG_SW_RESET, ITE_REG_SW_RESET_HDCP, ITE_REG_SW_RESET_HDCP);
+    // abort twice to ensure it gets done
+    for (int i=0; i < 2; i++) {
+      ret = i2c_write_byte(I2C_ADDRESS_HDMI, ITE_REG_DDC_CMD, ITE_REG_DDC_CMD_REQ_ABORT);
+      if (ret < 0) return ret;
+      // this can take up to 10 seconds...
+      for (int timeout=0; timeout < 200; timeout++) {
+        ret = i2c_read_byte(I2C_ADDRESS_HDMI, ITE_REG_DDC_STATUS, val);
+        if (ret < 0) return ret;
+        if (val & (ITE_REG_DDC_STATUS_DONE | ITE_REG_DDC_STATUS_ERROR))
+          break;
+
+        // wait for 50ms
+        atomTimerDelay(SYSTEM_TICKS_PER_SEC/20);
+      }
+    }
+    dbg_log("DDC HANG CLEARED");
+  }
+  // initialization done
+
+
+  uint8_t segment = block / 2;
+  uint8_t* p = dst;
+  uint8_t* end = dst + 128;
+  /* FIFO is 32 bytes but the first 3 bytes are lost, so we start reading
+   * 3 bytes before the data we actually want. This means the maximum read size
+   * must be 3 bytes smaller than what the FIFO (32 bytes) can hold. */
+  while (p < end) {
+    uint8_t to_read;
+    size_t diff = end - p;
+    if (diff > 29)
+      to_read = 29;
+    else
+      to_read = (uint8_t)diff;
+    uint8_t offset = p - dst + ((block & 1) ? 125 : 253);
+
+    // clear FIFO
+    ret = i2c_write_byte(I2C_ADDRESS_HDMI, ITE_REG_DDC_CMD, ITE_REG_DDC_CMD_REQ_FIFOCLR);
+    if (ret < 0) return ret;
+    // write four registers as one dword
+    uint32_t d = ITE_REG_DDC_MASTER_SEL_ROM; // ITE_REG_DDC_MASTER_SEL
+    d |= ITE_REG_DDC_HEADER_EDID << 8;       // ITE_REG_DDC_HEADER
+    d |= offset << 16;                       // ITE_REG_DDC_REQ_OFFSET
+    d |= (to_read+3) << 24;                  // ITE_REG_DDC_REQ_BYTE
+    ret = i2c_write_dword(I2C_ADDRESS_HDMI, ITE_REG_DDC_MASTER_SEL, d);
+    if (ret < 0) return ret;
+    // write another four, but only the first two are writable/important
+    d = segment;                             // ITE_REG_DDC_REQ_SEG
+    d |= ITE_REG_DDC_CMD_REQ_EDID << 8;      // ITE_REG_DDC_CMD
+    ret = i2c_write_dword(I2C_ADDRESS_HDMI, ITE_REG_DDC_REQ_SEG, d);
+    if (ret < 0) return ret;
+
+    // I2C always uses dword access so reading ITE_REG_DDC_STATUS also pops a byte from ITE_REG_DDC_FIFO...
+    do {
+      ret = i2c_read_dword(I2C_ADDRESS_HDMI, ITE_REG_DDC_REQ_SEG, d);
+      if (ret < 0) return ret;
+    } while (!(d & ((ITE_REG_DDC_STATUS_DONE | ITE_REG_DDC_STATUS_ERROR) << 16)));
+
+    if (d & (ITE_REG_DDC_STATUS_ERROR << 16))
+      break;
+
+    *p++ = d >> 24;
+
+    for (uint8_t index=1; index < to_read; index++) {
+      ret = i2c_read_byte(I2C_ADDRESS_HDMI, ITE_REG_DDC_FIFO, *p++);
+      if (ret < 0) return ret;
+    }
+  }
+
+  return (int)(p - dst);
+}
+
+FLASHMEM int FL2000::dsub_read_edid(uint8_t block, uint8_t* dst) {
+  uint32_t d;
+  /* E-DDC defines register 0x30 as the segment selector index.
+   * It's meant to reset to 0 after every operation - don't trust this
+   * Don't check the result for block 0 because the device may not support it (return NACK)
+   */
+  int ret = i2c_write_byte(I2C_ADDRESS_SEGMENT, 0, block);
+  if (ret < 0 && block) return ret;
+
+  for (size_t i=0; i < 128; i += 4) {
+    ret = i2c_read_dword(I2C_ADDRESS_EDID, i, d);
+    if (ret < 0) return ret;
+    memcpy(dst+i, &d, 4);
+    if (ret < 4) break;
+  }
+
+  return 128;
+}
+
+FLASHMEM void FL2000::update_edid(void) {
+  uint8_t new_edid[128] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
+
+  // attempt to read EDID block
+  auto s_tick = ARM_DWT_CYCCNT;
+  if (has_ITE66121) {
+    hdmi_read_edid(0, new_edid);
+  } else { // read EDID from DSUB
+    dsub_read_edid(0, new_edid);
+  }
+  dbg_log("Time to read EDID: %.2fus", (double)(ARM_DWT_CYCCNT - s_tick) / (F_CPU_ACTUAL / 1000));
+  // verify checksum
+  uint8_t sum = 0;
+  for (size_t i=0; i < 128; i++) {
+    sum += new_edid[i];
+  }
+  if (sum != 0) {
+    dbg_log("EDID checksum was incorrect, clearing");
+    memset(new_edid, 0, sizeof(new_edid));
+  } else {
+    dbg_log("Retrieved EDID block 0 (checksum: %02X)", new_edid[127]);
+  }
+
+  if (memcmp(new_edid, edid, sizeof(edid))) {
+    memcpy(edid, new_edid, sizeof(edid));
+    if (monitor_notify)
+      monitor_notify->triggerEvent(MONITOR_NOTIFY_EDID, \
+        memcmp(edid, "\0\xFF\xFF\xFF\xFF\xFF\xFF", 8) == 0 ? edid : NULL);
+  }
+}
+
 FLASHMEM int FL2000::process_interrupt(void) {
   int ret;
 
@@ -517,41 +656,21 @@ FLASHMEM int FL2000::process_interrupt(void) {
   ret = reg_read(REG_VGA_STATUS, status.val);
   if (ret < 0) return ret;
   dbg_log("vga_status register: %08X (%d)", status.val, status.framecount);
+
+  // ideally notify about new EDID before connection so the app can choose a suitable format
+
+  if (status.edid_int) {
+    if (!has_ITE66121)
+      update_edid();
+    else
+      status.edid_int = 0;
+  }
+
   if (status.vga_status) {
     if (!monitor_plugged_in) {
       reg_clear(0x0078, 1<<17);
 
-      // retrieve EDID block 0
-      if (has_ITE66121) {
-        dbg_log("UNIMPLEMENTED: reading EDID from HDMI");
-        memset(edid, 0xFF, 8);
-      } else { // read EDID from DSUB
-        uint32_t d[2];
-        if (i2c_read_dword(I2C_ADDRESS_DSUB, 0, d[0])>=0 &&
-            i2c_read_dword(I2C_ADDRESS_DSUB, 4, d[1])>=0 &&
-            d[0] == 0xFFFFFF00 && d[1] == 0x00FFFFFF) {
-          memcpy(edid, d, 8);
-          for (size_t i=8; i < sizeof(edid); i+=4) {
-            if (i2c_read_dword(I2C_ADDRESS_DSUB, i, d[0]) < 0)
-              break;
-            memcpy(edid+i, d, 4);
-          }
-        }
-      }
-      // verify checksum
-      uint8_t sum = 0;
-      for (size_t i=0; i < 128; i++) {
-//        printf("%02X ", edid[i]);
-//        if ((i&0xF)==15) printf("\n");
-        sum += edid[i];
-      }
-      if (sum != 0) {
-        dbg_log("EDID checksum was incorrect, clearing");
-        memset(edid, 0, sizeof(edid));
-      } else {
-        dbg_log("Retrieved EDID block 0 (checksum: %02X)", edid[127]);
-      }
-
+      if (status.edid_int==0) update_edid();
       monitor_plugged_in = true;
 
       if (monitor_notify)
@@ -561,6 +680,9 @@ FLASHMEM int FL2000::process_interrupt(void) {
     if (monitor_plugged_in) {
       monitor_plugged_in = false;
       reg_set(0x0078, 1<<17);
+
+      // stop rendering
+      ++render_id;
 
       if (monitor_notify)
         monitor_notify->triggerEvent(MONITOR_NOTIFY_DISCONNECTED);
@@ -1530,5 +1652,14 @@ FLASHMEM int FL2000::calcTiming(const uint32_t freq, uint8_t& prescaler, uint8_t
     return 0;
 
   errno = ERANGE;
+  return -1;
+}
+
+FLASHMEM int FL2000::fetchEDID(int block, uint8_t *edid_data) {
+  if (block==0 && memcmp(edid, "\0\xFF\xFF\xFF\xFF\xFF\xFF", 8)==0) {
+    memcpy(edid_data, edid, 128);
+    return 128;
+  }
+
   return -1;
 }
