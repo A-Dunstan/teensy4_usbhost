@@ -178,63 +178,47 @@ int USB_Driver::IsochronousMessage(uint8_t bEndpoint, isolength& Lengths, void *
   return -1;
 }
 
-class FuncWrapper {
-private:
-  const USBCallback base;
-public:
-  const USBCallback wrap = [=](int r) {
-    base(r);
-    delete this;
-  };
-  FuncWrapper(USBCallback& b) : base(std::move(b)) {}
-};
-
-int USB_Driver::BulkMessage(uint8_t bEndpoint, uint32_t dLength, void *data, USBCallback cb_func) {
-  FuncWrapper* cb = new (std::nothrow) FuncWrapper(cb_func);
+template <class req_fn>
+static int MessageWrapper(USBCallback& user_cb, const req_fn& req) {
+  int ret = -1;
+  USBCallback* cb = new(std::nothrow) USBCallback;
   if (cb == NULL) {
     errno = ENOMEM;
   } else {
-    if (BulkMessage(bEndpoint, dLength, data, &cb->wrap) >= 0)
-      return 0;
+    *cb = [=,orig_cb(std::move(user_cb))](int r) {
+      orig_cb(r);
+      delete cb;
+    };
+    ret = req(cb);
+    if (ret >= 0)
+      return ret;
     delete cb;
   }
-  return -1;
+  return ret;
+}
+
+int USB_Driver::BulkMessage(uint8_t bEndpoint, uint32_t dLength, void *data, USBCallback cb_func) {
+  return MessageWrapper(cb_func, [&](const USBCallback* cb)->int {
+    return BulkMessage(bEndpoint, dLength, data, cb);
+  });
 }
 
 int USB_Driver::InterruptMessage(uint8_t bEndpoint, uint16_t wLength, void *data, USBCallback cb_func) {
-  FuncWrapper* cb = new (std::nothrow) FuncWrapper(cb_func);
-  if (cb == NULL) {
-    errno = ENOMEM;
-  } else {
-    if (InterruptMessage(bEndpoint, wLength, data, &cb->wrap) >= 0)
-      return 0;
-    delete cb;
-  }
-  return -1;
+  return MessageWrapper(cb_func, [&](const USBCallback* cb)->int {
+    return InterruptMessage(bEndpoint, wLength, data, cb);
+  });
 }
 
 int USB_Driver::IsochronousMessage(uint8_t bEndpoint, isolength& Lengths, void *data, USBCallback cb_func) {
-  FuncWrapper* cb = new (std::nothrow) FuncWrapper(cb_func);
-  if (cb == NULL) {
-    errno = ENOMEM;
-  } else {
-    if (IsochronousMessage(bEndpoint, Lengths, data, &cb->wrap) >= 0)
-      return 0;
-    delete cb;
-  }
-  return -1;
+  return MessageWrapper(cb_func, [&](const USBCallback* cb)->int {
+    return IsochronousMessage(bEndpoint, Lengths, data, cb);
+  });
 }
 
 int USB_Driver::BulkMessage(uint8_t bEndpoint, const usb_bulkintr_sg* sg, USBCallback cb_func) {
-  FuncWrapper* cb = new (std::nothrow) FuncWrapper(cb_func);
-  if (cb == NULL) {
-    errno = ENOMEM;
-  } else {
-    if (BulkMessage(bEndpoint, sg, &cb->wrap) >= 0)
-      return 0;
-    delete cb;
-  }
-  return -1;
+  return MessageWrapper(cb_func, [&](const USBCallback* cb)->int {
+    return BulkMessage(bEndpoint, sg, cb);
+  });
 }
 
 // synchronous functions - not implemented here, these use weak symbols so they can be overridden using OS specific code
