@@ -131,12 +131,14 @@ FLASHMEM bool XBOX360Pad::offer(const usb_interface_descriptor* id, size_t lengt
   if (id->bInterfaceClass != 255) return false;
   if (id->bInterfaceSubClass != 93) return false;
   if (id->bInterfaceProtocol != 1) return false;
-  if (id->bNumEndpoints < 1) return false;
+  auto ep1 = find_endpoint(id, length);
+  if (find_endpoint(ep1, length) == NULL) return false;
   return true;
 }
 
 FLASHMEM USB_Driver* XBOX360Pad::attach(const usb_interface_descriptor* id, size_t length, USB_Device *dev) {
   if (getDevice() == NULL) {
+    ep_in = ep_out = 255;
     const usb_endpoint_descriptor *ep1 = find_endpoint(id, length);
     const usb_endpoint_descriptor *ep2 = find_endpoint(ep1, length);
     if (ep1 != NULL) {
@@ -144,14 +146,10 @@ FLASHMEM USB_Driver* XBOX360Pad::attach(const usb_interface_descriptor* id, size
         ep_in = ep1->bEndpointAddress;
         if (ep2 && (ep2->bEndpointAddress & 0x80)==0)
           ep_out = ep2->bEndpointAddress;
-        else
-          ep_out = 255;
       } else {
         ep_out = ep1->bEndpointAddress;
         if (ep2 && (ep2->bEndpointAddress & 0x80))
           ep_in = ep2->bEndpointAddress;
-        else
-          ep_in = 255;
       }
     }
     if (ep_in != 255 && ep_out != 255) {
