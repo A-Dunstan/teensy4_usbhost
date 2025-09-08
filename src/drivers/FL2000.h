@@ -52,8 +52,8 @@ enum notify_status {
 #define COLOR_FORMAT_RGB_16_555      2
 #define COLOR_FORMAT_RGB_8_332       3        // note this is not the "typical" 332 - it is RRGGGBBB
 #define COLOR_FORMAT_RGB_8_INDEXED   4
-#define COLOR_FORMAT_COMPRESSED      0x80000000
-#define COLOR_FORMAT_NODMA           0x40000000   // this avoids using DMA to copy input framedata into USB slice buffers
+#define COLOR_FORMAT_COMPRESSED      0x40000000
+#define COLOR_FORMAT_NODMA           0x20000000   // this avoids using DMA to copy input framedata into USB slice buffers
 
 #define VIDMODE_FLAG_HSYNC_POS     (1<<0)
 #define VIDMODE_FLAG_VSYNC_POS     (1<<1)
@@ -171,12 +171,37 @@ private:
 
   void convert_dma_init(slice_data *slice);
 
+  class compressor {
+    size_t offset;
+    uint32_t repeat;
+    uint32_t last_pixel;
+
+    union {
+      uint32_t d[2];
+      uint16_t w[4];
+      uint8_t b[8];
+    } buf;
+
+    void next(uint8_t*&);
+
+  public:
+    void reset(void) {
+      last_pixel = 0;
+    }
+
+    void encode(uint8_t*&, uint8_t);
+    void flush(uint8_t*&);
+  };
+
+  compressor compress;
+
   void (FL2000::*convert_slice)(slice_data* slice, uint32_t height);
   void convert_rgb24_to_rgb8(slice_data*,uint32_t);
   void convert_rgb565_to_rgb8(slice_data*,uint32_t);
   void convert_rgb555_to_rgb8(slice_data*,uint32_t);
   void convert_copy(slice_data*,uint32_t);
   void convert_dma(slice_data*,uint32_t);
+  void convert_compress8(slice_data*,uint32_t);
 
   int hdmi_read_edid(uint8_t block, uint8_t* dst);
   int dsub_read_edid(uint8_t block, uint8_t* dst);
