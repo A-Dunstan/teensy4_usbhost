@@ -1127,6 +1127,87 @@ void FL2000::convert_copy(slice_data *slice, uint32_t height) {
   send_slice(slice, height*width);
 }
 
+void FL2000::compressor::next(uint8_t* &dst) {
+  if (++offset == 8) {
+    ((uint32_t*)dst)[1] = buf.d[0];
+    ((uint32_t*)dst)[0] = buf.d[1];
+    offset = 0;
+    dst += 8;
+  }
+}
+
+void FL2000::compressor::encode(uint8_t*& dst, uint8_t p) {
+  p = (p>>1)|0x80;
+
+  if (p == last_pixel) {
+    if (++repeat & 0x80) {
+      buf.b[offset] = 0x7F;
+      repeat = 1;
+      next(dst);
+    }
+    return;
+  }
+
+  last_pixel = p;
+
+  if (repeat) {
+    buf.b[offset] = repeat;
+    repeat = 0;
+    next(dst);
+  }
+
+  buf.b[offset] = p;
+  next(dst);
+}
+
+void FL2000::compressor::flush(uint8_t*& dst) {
+  // last pixel must be uncompressed
+  if (repeat >= 1) {
+    if (repeat > 1) {
+      buf.b[offset] = repeat - 1;
+      next(dst);
+    }
+    buf.b[offset] = last_pixel;
+    repeat = 0;
+    next(dst);
+  }
+
+  if (offset == 0) return;
+
+  ((uint32_t*)dst)[1] = buf.d[0];
+  ((uint32_t*)dst)[0] = buf.d[1];
+  dst += 8;
+  offset = 0;
+}
+
+void FL2000::convert_compress8(slice_data *slice, uint32_t height) {
+  uint32_t width = current_mode.active_width;
+  size_t offset_mask = 0xFFFFFFFF >> current_fixed_bits;
+  size_t offset = (size_t)current_src & offset_mask;
+  const uint8_t* src = current_src - offset;
+  uint8_t* dst = slice->data;
+
+
+  for (size_t i=0; i < height; i++) {
+    for (size_t j=0; j < width; j++) {
+      compress.encode(dst, src[offset++ & offset_mask]);
+    }
+
+    offset += current_pitch - width;
+  }
+
+  if (slice->last)
+    compress.flush(dst);
+  compress.reset();
+
+
+  auto old_src = current_src;
+  current_src = src + (offset & offset_mask);
+//  dbg_log("send_slice: %u bytes @ %p->%p (%u lines, %u bytes)", dst - slice->data, old_src, current_src, height, height * width);
+  send_slice(slice, dst - slice->data);
+}
+
+
 FLASHMEM int FL2000::set_mode(const struct mode_timing& mode, int32_t input_format, int32_t output_format) {
   static const struct conversion_entry {
      int32_t input_format;        int32_t output_format;      void (FL2000::*func)(FL2000::slice_data*,uint32_t);
@@ -1138,6 +1219,7 @@ FLASHMEM int FL2000::set_mode(const struct mode_timing& mode, int32_t input_form
     {COLOR_FORMAT_RGB_8_332,      COLOR_FORMAT_RGB_8_332,     &FL2000::convert_dma},
     {COLOR_FORMAT_RGB_16_555,     COLOR_FORMAT_RGB_16_555,    &FL2000::convert_dma},
     {COLOR_FORMAT_RGB_16_565,     COLOR_FORMAT_RGB_16_565,    &FL2000::convert_dma},
+    {COLOR_FORMAT_RGB_8_INDEXED,  COLOR_FORMAT_RGB_8_INDEXED | COLOR_FORMAT_COMPRESSED, &FL2000::convert_compress8},
     {COLOR_FORMAT_NODMA | COLOR_FORMAT_RGB_8_INDEXED,  COLOR_FORMAT_RGB_8_INDEXED, &FL2000::convert_copy},
     {COLOR_FORMAT_NODMA | COLOR_FORMAT_RGB_8_332,      COLOR_FORMAT_RGB_8_332,     &FL2000::convert_copy},
     {COLOR_FORMAT_NODMA | COLOR_FORMAT_RGB_16_555,     COLOR_FORMAT_RGB_16_555,    &FL2000::convert_copy},
@@ -1488,6 +1570,8 @@ int FL2000::frame_begin(void) {
   current_src = current_fb;
   next_line = 0;
 
+  compress.reset();
+
   begin_slice(slices+0);
   if (next_line < max_lines)
     begin_slice(slices+1);
@@ -1522,22 +1606,23 @@ void FL2000::begin_slice(slice_data* slice) {
     uint16_t bytes_per_line = current_mode.active_width * output_bytes_per_pixel;
 
     // first transfer: single line
-    slice->sg[0].data = src;
-    slice->sg[0].wLength = bytes_per_line;
+    slice->sg[0] = {src, bytes_per_line};
 
     auto sg = &slice->sg[1];
     for (size_t line = 1; line < lines_to_fill; line++) {
       // middle transfers: pairs of lines
-      sg->data = src;
-      sg->wLength = 2*bytes_per_line;
-      ++sg;
+      *sg++ = {src, (uint16_t)(2*bytes_per_line)};
       src += bytes_per_line;
     }
     // last transfer: single line
-    sg[0].data = src;
-    sg[0].wLength = bytes_per_line;
+    sg[0] = {src, bytes_per_line};
     // terminate sg list
-    sg[1].data = NULL;
+    sg[1] = {NULL, 0};
+
+  } else {
+    slice->sg.resize(2);
+    slice->sg[0].data = slice->data;
+    slice->sg[1] = {NULL, 0};
   }
 
   next_line += lines_to_fill;
@@ -1551,34 +1636,11 @@ void FL2000::send_slice(slice_data *slice, size_t slice_len) {
    * when the lambda is executed.
    */
   auto r_id = render_id;
+  USBCallback slice_cb;
 
-  auto slice_cb = [=, sendit = !slice->last](int r) {
-    if (r >= 0) {
-      if (sendit && next_line < max_lines) {
-        threadMsg msg = {
-          .cmd = CMD_SLICE_DONE,
-          .slice = {
-            .s = slice,
-            .id = r_id,
-          }
-        };
-        if (atomQueuePut(&workQueue, -1, &msg) != ATOM_OK) {
-          dbg_log("Failed to send CMD_SLICE_DONE msg");
-        }
-      }
-    } else {
-      dbg_log("BulkMessage returned error (sending slice): %d", r);
-    }
-  };
 
-  int r;
-  if (current_mode.flags & VIDMODE_FLAG_LINEDOUBLE)
-    r = BulkMessage(1, &slice->sg[0], slice_cb);
-  else
-    r = BulkMessage(1, slice_len, slice->data, slice_cb);
-  if (r < 0) {
-    dbg_log("Sending BulkMessage (slice) failed");
-    return;
+  if ((current_mode.flags & VIDMODE_FLAG_LINEDOUBLE) == 0) {
+    slice->sg[0].wLength = slice_len;
   }
 
   if (slice->last) {
@@ -1590,7 +1652,7 @@ void FL2000::send_slice(slice_data *slice, size_t slice_len) {
     if (monitor_notify)
       monitor_notify->triggerEvent(MONITOR_NOTIFY_FRAMEDONE, (void*)current_src);
 
-    auto zlp_cb = [=](int r) {
+    slice_cb = [=](int r) {
       if (r >= 0) {
         threadMsg msg = {
           .cmd = CMD_FRAME_DONE,
@@ -1606,9 +1668,35 @@ void FL2000::send_slice(slice_data *slice, size_t slice_len) {
       }
     };
 
-    if (BulkMessage(1, 0, NULL, zlp_cb) < 0) {
-      dbg_log("Sending ZLP BulkMessage failed");
-    }
+    // replace NULL entry with zero-length (by assigning an address)
+    slice->sg[slice->sg.size()-1].data = this;
+    // add terminator
+    slice->sg.push_back({NULL});
+  } else {
+    slice_cb = [=](int r) {
+      if (r >= 0) {
+        if (next_line < max_lines) {
+          threadMsg msg = {
+            .cmd = CMD_SLICE_DONE,
+            .slice = {
+              .s = slice,
+              .id = r_id,
+            }
+          };
+          if (atomQueuePut(&workQueue, -1, &msg) != ATOM_OK) {
+            dbg_log("Failed to send CMD_SLICE_DONE msg");
+          }
+        }
+      } else {
+        dbg_log("BulkMessage returned error (sending slice): %d", r);
+      }
+    };
+  }
+
+  int r = BulkMessage(1, &slice->sg[0], slice_cb);
+  if (r < 0) {
+    dbg_log("Sending BulkMessage (slice) failed");
+    return;
   }
 }
 
