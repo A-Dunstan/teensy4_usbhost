@@ -1650,7 +1650,7 @@ void FL2000::send_slice(slice_data *slice, size_t slice_len) {
      * since that command begins the processing of the next frame.
      */
     if (monitor_notify)
-      monitor_notify->triggerEvent(MONITOR_NOTIFY_FRAMEDONE, (void*)current_src);
+      monitor_notify->triggerEvent(MONITOR_NOTIFY_FRAMEDONE, (void*)current_fb);
 
     slice_cb = [=](int r) {
       if (r >= 0) {
