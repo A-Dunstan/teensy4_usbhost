@@ -334,7 +334,7 @@ FLASHMEM int FL2000::i2c_transfer(uint8_t address, uint8_t offset, bool read) {
     if (ctrl.complete)
       break;
 
-    while (timer < 2);
+    while (timer < 2) asm ("wfi");
     timer -= 2;
   }
   if (retry < I2C_RETRY_MAX && ctrl.status==0)
