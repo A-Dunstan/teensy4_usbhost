@@ -204,7 +204,7 @@ void FL2000::thread(void) {
           next_pitch = msg.frame_req->pitch;
           next_fb = (uint8_t*)msg.frame_req->src;
           next_fixed_bits = msg.frame_req->fixed_bits;
-          msg.frame_req->result = (current_fb == NULL) ? frame_begin() : 0;
+          msg.frame_req->result = (current_fb == NULL && max_lines) ? frame_begin() : 0;
           atomSemPut(&msg.frame_req->sema);
           break;
         case CMD_SET_PALETTE:
@@ -1182,8 +1182,8 @@ FLASHMEM int FL2000::set_mode(const struct mode_timing& mode, int32_t input_form
     output_format |= COLOR_FORMAT_COMPRESSED;
   }
 
-  int input = input_format & ~(COLOR_FORMAT_COMPRESSED|COLOR_FORMAT_NODMA);
-  int output = output_format & ~(COLOR_FORMAT_COMPRESSED|COLOR_FORMAT_NODMA);
+  auto input = input_format & ~(COLOR_FORMAT_COMPRESSED|COLOR_FORMAT_NODMA);
+  auto output = output_format & ~(COLOR_FORMAT_COMPRESSED|COLOR_FORMAT_NODMA);
 
   if (input == COLOR_FORMAT_RGB_8_INDEXED) {
     // we don't keep a local copy of the palette so any other output format is invalid
@@ -1497,8 +1497,8 @@ int FL2000::frame_begin(void) {
 
 void FL2000::begin_slice(slice_data* slice) {
   if (next_line >= max_lines) {
-    dbg_log("begin_slice next_line >= max_lines");
-    while(1);
+    dbg_log("begin_slice next_line >= max_lines (%u %u %p)", next_line, max_lines, slice);
+    return;
   }
   uint16_t lines_to_fill = max_lines - next_line;
   uint16_t max_slice_lines = FL2000_SLICE_SIZE / (current_mode.active_width * output_bytes_per_pixel);
