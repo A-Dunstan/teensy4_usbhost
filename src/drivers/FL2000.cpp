@@ -628,7 +628,7 @@ FLASHMEM void FL2000::update_edid(void) {
   } else { // read EDID from DSUB
     dsub_read_edid(0, new_edid);
   }
-  dbg_log("Time to read EDID: %.2fus", (double)(ARM_DWT_CYCCNT - s_tick) / (F_CPU_ACTUAL / 1000));
+  dbg_log("Time to read EDID: %.2fms", (double)(ARM_DWT_CYCCNT - s_tick) / (F_CPU_ACTUAL / 1000));
   // verify checksum
   uint8_t sum = 0;
   for (size_t i=0; i < 128; i++) {
