@@ -47,7 +47,7 @@ typedef union {
     uint32_t dac_status        :1;
     uint32_t linebuf_empty     :1;  /* originally: linebuf_underflow */
     uint32_t linebuf_full      :1;  /* originally: linebuf_overflow */
-    uint32_t framecount        :16;
+    uint32_t framecount        :16; /* this stops counting when it gets to 65535 */
     uint32_t hdmi_int          :1;  /* self-clearing */
     uint32_t hdmi_status       :1;
     uint32_t edid_status       :1;
