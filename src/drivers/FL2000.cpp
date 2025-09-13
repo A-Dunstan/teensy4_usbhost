@@ -67,7 +67,10 @@ static const struct mode_timing vid_modes[] PROGMEM = {
   {  640,    350,     70,      800,     96,     48,   449,     2,      60,   1,   73,  29, VIDMODE_FLAG_HSYNC_POS},
   {  640,    200,     70,      800,     96,     48,   449,     2,      35,   1,   73,  29, VIDMODE_FLAG_LINEDOUBLE|VIDMODE_FLAG_VSYNC_POS},
   {  640,    400,     70,      800,     96,     48,   449,     2,      35,   1,   73,  29, VIDMODE_FLAG_VSYNC_POS},
+  {  640,    400,     85,      832,     64,     96,   445,     3,      41,   1,   63,  20, VIDMODE_FLAG_VSYNC_POS},
   {  640,    480,     60,      800,     96,     48,   525,     2,      33,   1,   73,  29, 0},
+  {  640,    480,     75,      840,     64,    120,   500,     3,      16,   1,   63,  20, 0},
+  {  640,    512,     60,      844,     56,    124,   1066,    3,      38,   1,   27,   5, VIDMODE_FLAG_LINEDOUBLE|VIDMODE_FLAG_HSYNC_POS|VIDMODE_FLAG_VSYNC_POS},
   {  720,    400,     70,      900,     108,    56,   449,     2,      32,   1,   17,   6, VIDMODE_FLAG_VSYNC_POS},
   {  720,    480,     60,      900,     108,    56,   525,     2,      33,   1,   17,   6, 0},
   {  768,    576,     50,      976,     104,    80,   597,     3,      17,   1,   35,  12, VIDMODE_FLAG_VSYNC_POS},
@@ -75,6 +78,7 @@ static const struct mode_timing vid_modes[] PROGMEM = {
   {  800,    600,     56,      1024,    128,    72,   625,     2,      22,   1,   18,   5, VIDMODE_FLAG_HSYNC_POS|VIDMODE_FLAG_VSYNC_POS},
   {  800,    600,     60,      1056,    128,    88,   628,     4,      23,   1,    8,   2, VIDMODE_FLAG_HSYNC_POS|VIDMODE_FLAG_VSYNC_POS},
   {  848,    480,     60,      1060,    128,    64,   525,     2,      33,   1,   45,  12, 0},
+  { 1024,    768,     60,      1344,    136,   160,   806,     6,      29,   1,   13,   2, 0},
   { 1280,   1024,     60,      1688,    112,   248,   1066,    3,      38,   1,   54,   5, VIDMODE_FLAG_HSYNC_POS|VIDMODE_FLAG_VSYNC_POS},
 };
 
@@ -1128,58 +1132,104 @@ void FL2000::convert_copy(slice_data *slice, uint32_t height) {
   send_slice(slice, height*width);
 }
 
-void FL2000::compressor::next(uint8_t* &dst) {
-  if (++offset == 8) {
-    ((uint32_t*)dst)[1] = buf.d[0];
-    ((uint32_t*)dst)[0] = buf.d[1];
-    offset = 0;
-    dst += 8;
-  }
-}
+class rle_compressor {
+  uint32_t last_pixel = 0;
+  uint32_t repeat = 0;
+  std::vector<uint8_t> buf;
 
-void FL2000::compressor::encode(uint8_t*& dst, uint8_t p) {
-  p = (p>>1)|0x80;
+  size_t uncomp_size = 0;
+  size_t comp_size = 0;
+public:
+  rle_compressor(size_t max_row) {buf.reserve(max_row); }
 
-  if (p == last_pixel) {
-    if (++repeat & 0x80) {
-      buf.b[offset] = 0x7F;
-      repeat = 1;
-      next(dst);
+  void encode(uint8_t p) {
+    p = (p >> 1) | 0x80;
+    ++uncomp_size;
+
+    if (p != last_pixel) {
+      if (repeat) {
+        buf.push_back(repeat);
+        repeat = 0;
+      }
+      last_pixel = p;
+    } else {
+      if (++repeat == 0x7F) {
+        p = 0x7F;
+        repeat = 0;
+      }
+      else p = 0;
     }
-    return;
+
+    if (buf.size() < 8) ++comp_size;
+    if (p) buf.push_back(p);
   }
 
-  last_pixel = p;
+  void write(uint8_t* &dst) {
+    while (buf.size() >= 8) {
+      if (comp_size != 8) {
+        if (buf.size() == 8) return;
+        // only output if the remaining bytes can be expanded to a multiple of 8
+        if ((uncomp_size - comp_size) < ((buf.size() - /*(repeat ? 0 : 1)*/ 1 + repeat) & ~7))
+          return;
+      }
 
-  if (repeat) {
-    buf.b[offset] = repeat;
-    repeat = 0;
-    next(dst);
-  }
-
-  buf.b[offset] = p;
-  next(dst);
-}
-
-void FL2000::compressor::flush(uint8_t*& dst) {
-  // last pixel must be uncompressed
-  if (repeat >= 1) {
-    if (repeat > 1) {
-      buf.b[offset] = repeat - 1;
-      next(dst);
+      uncomp_size -= comp_size;
+      memcpy(dst + 4, &buf[0], 4);
+      memcpy(dst + 0, &buf[4], 4);
+      dst += 8;
+      buf.erase(buf.begin(), buf.begin()+8);
+      // calculate new comp_size
+      comp_size = 0;
+      for (size_t i=0; i < buf.size() && i < 8; i++) {
+        comp_size += (buf[i] & 0x80) ? 1 : buf[i];
+      }
+      if (buf.size() < 8) {
+        comp_size += repeat;
+        return;
+      }
     }
-    buf.b[offset] = last_pixel;
-    repeat = 0;
-    next(dst);
   }
 
-  if (offset == 0) return;
+  void flush(uint8_t* &dst) {
+    while (repeat) {
+      if ((buf.size() & 7) == 7) {
+        buf.push_back(repeat);
+        repeat = 0;
+        break;
+      }
+      buf.push_back(last_pixel);
+      --repeat;
+    }
 
-  ((uint32_t*)dst)[1] = buf.d[0];
-  ((uint32_t*)dst)[0] = buf.d[1];
-  dst += 8;
-  offset = 0;
-}
+    // uncompress to increase output size to a multiple of 8
+    for (size_t i=0; (buf.size() & 7) && i < buf.size(); i++) {
+      auto p = buf[i];
+      if (p < 0x80 && p > 1) {
+        size_t to_add = 8 - (buf.size() & 7);
+        if (to_add >= p) to_add = p-1;
+        buf[i] = p - to_add;
+        buf.insert(buf.begin() + i + 1, to_add, 1);
+        i += to_add;
+      }
+    }
+
+    if (buf.size() & 7) {
+      fprintf(stderr, "COMPRESSOR FAILED, output size %u\n", buf.size());
+      while(1) asm volatile("wfi");
+    }
+
+    for (size_t i=0; i < buf.size(); i+= 8) {
+      memcpy(dst + 4, &buf[i+0], 4);
+      memcpy(dst + 0, &buf[i+4], 4);
+      dst += 8;
+    }
+
+    last_pixel = 0;
+    buf.clear();
+    uncomp_size = 0;
+    comp_size = 0;
+  }
+};
 
 void FL2000::convert_compress8(slice_data *slice, uint32_t height) {
   uint32_t width = current_mode.active_width;
@@ -1187,24 +1237,60 @@ void FL2000::convert_compress8(slice_data *slice, uint32_t height) {
   size_t offset = (size_t)current_src & offset_mask;
   const uint8_t* src = current_src - offset;
   uint8_t* dst = slice->data;
+  bool doublestrike = current_mode.flags & VIDMODE_FLAG_LINEDOUBLE;
+  rle_compressor compress(width);
 
+  // last line of frame requires special handling, see blow
+  if (slice->last) --height;
 
   for (size_t i=0; i < height; i++) {
-    for (size_t j=0; j < width; j++) {
-      compress.encode(dst, src[offset++ & offset_mask]);
+    for (size_t j=0; j < width; j+=8) {
+      for (size_t k=0; k < 8; k++) {
+        compress.encode(src[offset++ & offset_mask]);
+      }
+//      compress.write(dst);
+    }
+
+    compress.flush(dst);
+    if (doublestrike) {
+      slice->sg[i].wLength = dst - (uint8_t*)slice->sg[i].data;
+      slice->sg[i+2].data = dst;
     }
 
     offset += current_pitch - width;
   }
 
-  if (slice->last)
+  if (slice->last) {
+    /* The very last data byte of a frame can't be a run. This is very difficult to predict
+     * due to the requirement of each compressed line being a multiple of 8 bytes in length,
+     * so just shorten the last source line by 8 pixels then encode them as uncompressed.
+     */
+    for (size_t j=0; j < width-8; j+=8) {
+      for (size_t k=0; k < 8; k++) {
+        compress.encode(src[offset++ & offset_mask]);
+      }
+//      compress.write(dst);
+    }
+
     compress.flush(dst);
-  compress.reset();
+    // copy final 8 pixels uncompressed
+    for (size_t j=0; j < 8; j++) {
+      dst[j^4] = (src[offset++ & offset_mask] >> 1) | 0x80;
+    }
+    dst += 8;
 
+    if (doublestrike)
+      slice->sg[height].wLength = dst - (uint8_t*)slice->sg[height].data;
 
-  auto old_src = current_src;
+    ++height;
+  }
+
+  if (doublestrike) {
+    slice->sg[height].wLength = dst - (uint8_t*)slice->sg[height].data;
+    slice->sg[height+1].data = NULL;
+  }
+
   current_src = src + (offset & offset_mask);
-//  dbg_log("send_slice: %u bytes @ %p->%p (%u lines, %u bytes)", dst - slice->data, old_src, current_src, height, height * width);
   send_slice(slice, dst - slice->data);
 }
 
@@ -1250,7 +1336,7 @@ FLASHMEM int FL2000::set_mode(const struct mode_timing& mode, int32_t input_form
   if (mode.active_width & 7)
     return -EINVAL;
 
-  if (mode.active_width >= 1024)
+  if (mode.active_width > 1280)
     return -EINVAL;
 
   if (input_format == COLOR_FORMAT_AUTO) {
@@ -1570,8 +1656,6 @@ int FL2000::frame_begin(void) {
 
   current_src = current_fb;
   next_line = 0;
-
-  compress.reset();
 
   begin_slice(slices+0);
   if (next_line < max_lines)
