@@ -136,8 +136,6 @@ private:
     {bulk_data[1]}
   };
 
-  uint8_t bulk_data[2][FL2000_SLICE_SIZE] __attribute__((aligned(32)));
-
   int reg_write(uint16_t offset, const uint32_t val);
   int reg_read(uint16_t offset, uint32_t& val);
 
@@ -171,30 +169,6 @@ private:
 
   void convert_dma_init(slice_data *slice);
 
-  class compressor {
-    size_t offset;
-    uint32_t repeat;
-    uint32_t last_pixel;
-
-    union {
-      uint32_t d[2];
-      uint16_t w[4];
-      uint8_t b[8];
-    } buf;
-
-    void next(uint8_t*&);
-
-  public:
-    void reset(void) {
-      last_pixel = 0;
-    }
-
-    void encode(uint8_t*&, uint8_t);
-    void flush(uint8_t*&);
-  };
-
-  compressor compress;
-
   void (FL2000::*convert_slice)(slice_data* slice, uint32_t height);
   void convert_rgb24_to_rgb8(slice_data*,uint32_t);
   void convert_rgb565_to_rgb8(slice_data*,uint32_t);
@@ -206,6 +180,8 @@ private:
   int hdmi_read_edid(uint8_t block, uint8_t* dst);
   int dsub_read_edid(uint8_t block, uint8_t* dst);
   void update_edid(void);
+
+  uint8_t bulk_data[2][FL2000_SLICE_SIZE] __attribute__((aligned(32)));
 
 public:
   FL2000();
