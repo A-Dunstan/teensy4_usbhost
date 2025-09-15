@@ -78,6 +78,7 @@ static const struct mode_timing vid_modes[] PROGMEM = {
   {  800,    600,     56,      1024,    128,    72,   625,     2,      22,   1,   18,   5, VIDMODE_FLAG_HSYNC_POS|VIDMODE_FLAG_VSYNC_POS},
   {  800,    600,     60,      1056,    128,    88,   628,     4,      23,   1,    8,   2, VIDMODE_FLAG_HSYNC_POS|VIDMODE_FLAG_VSYNC_POS},
   {  848,    480,     60,      1060,    128,    64,   525,     2,      33,   1,   45,  12, 0},
+  { 1024,    600,     60,      1352,    164,   112,   628,     4,      23,   2,  123,  12, VIDMODE_FLAG_HSYNC_POS|VIDMODE_FLAG_VSYNC_POS},
   { 1024,    768,     60,      1344,    136,   160,   806,     6,      29,   1,   13,   2, 0},
   { 1280,   1024,     60,      1688,    112,   248,   1066,    3,      38,   1,   54,   5, VIDMODE_FLAG_HSYNC_POS|VIDMODE_FLAG_VSYNC_POS},
 };
