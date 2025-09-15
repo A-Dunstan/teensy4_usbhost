@@ -37,15 +37,15 @@
 #define I2C_ADDRESS_EDID        0x50
 
 template <class Ex>
-Ex* LoadExclusivePtr(Ex** ptr) {
-  Ex* val;
+Ex LoadExclusivePtr(Ex* ptr) {
+  Ex val;
   asm volatile("ldrex %0, %1" : "=r" (val) : "Q" (*ptr));
   return val;
 }
 
 // returns 0 if store succeeded, 1 on failure
 template <class Ex>
-int StoreExclusivePtr(Ex* val, Ex** ptr) {
+int StoreExclusivePtr(Ex val, Ex* ptr) {
   int r;
   asm volatile("strex %0, %2, %1" : "=&r"(r), "=Q"(*ptr) : "r"(val));
   return r;
