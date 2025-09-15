@@ -560,6 +560,7 @@ FLASHMEM int FL2000::hdmi_read_edid(uint8_t block, uint8_t* dst) {
   /* FIFO is 32 bytes but the first 3 bytes are lost, so we start reading
    * 3 bytes before the data we actually want. This means the maximum read size
    * must be 3 bytes smaller than what the FIFO (32 bytes) can hold. */
+   dbg_log("Reading HDMI EDID...");
   while (p < end) {
     uint8_t to_read;
     size_t diff = end - p;
@@ -600,6 +601,7 @@ FLASHMEM int FL2000::hdmi_read_edid(uint8_t block, uint8_t* dst) {
       ret = i2c_read_byte(I2C_ADDRESS_HDMI, ITE_REG_DDC_FIFO, *p++);
       if (ret < 0) return ret;
     }
+    dbg_log(".");
   }
 
   return (int)(p - dst);
