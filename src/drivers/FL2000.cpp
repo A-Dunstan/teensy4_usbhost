@@ -1138,99 +1138,77 @@ void FL2000::convert_copy(slice_data *slice, uint32_t height) {
 class rle_compressor {
   uint32_t last_pixel = 0;
   uint32_t repeat = 0;
-  std::vector<uint8_t> buf;
-
-  size_t uncomp_size = 0;
-  size_t comp_size = 0;
+  size_t len = 0;
+  uint8_t* const buf;
 public:
-  rle_compressor(size_t max_row) {buf.reserve(max_row); }
+  rle_compressor(uint8_t* _buf) : buf(_buf) {}
 
   void encode(uint8_t p) {
     p = (p >> 1) | 0x80;
-    ++uncomp_size;
 
     if (p != last_pixel) {
       if (repeat) {
-        buf.push_back(repeat);
+        buf[len++] = repeat;
         repeat = 0;
       }
       last_pixel = p;
     } else {
-      if (++repeat == 0x7F) {
-        p = 0x7F;
-        repeat = 0;
-      }
-      else p = 0;
-    }
-
-    if (buf.size() < 8) ++comp_size;
-    if (p) buf.push_back(p);
-  }
-
-  void write(uint8_t* &dst) {
-    while (buf.size() >= 8) {
-      if (comp_size != 8) {
-        if (buf.size() == 8) return;
-        // only output if the remaining bytes can be expanded to a multiple of 8
-        if ((uncomp_size - comp_size) < ((buf.size() - /*(repeat ? 0 : 1)*/ 1 + repeat) & ~7))
-          return;
-      }
-
-      uncomp_size -= comp_size;
-      memcpy(dst + 4, &buf[0], 4);
-      memcpy(dst + 0, &buf[4], 4);
-      dst += 8;
-      buf.erase(buf.begin(), buf.begin()+8);
-      // calculate new comp_size
-      comp_size = 0;
-      for (size_t i=0; i < buf.size() && i < 8; i++) {
-        comp_size += (buf[i] & 0x80) ? 1 : buf[i];
-      }
-      if (buf.size() < 8) {
-        comp_size += repeat;
+      if (++repeat < 0x80)
         return;
-      }
+      p = 0x7F;
+      repeat = 1;
     }
+
+    buf[len++] = p;
   }
 
   void flush(uint8_t* &dst) {
     while (repeat) {
-      if ((buf.size() & 7) == 7) {
-        buf.push_back(repeat);
+      if ((len & 7) == 7) {
+        buf[len++] = repeat;
         repeat = 0;
         break;
       }
-      buf.push_back(last_pixel);
+      buf[len++] = 1;
       --repeat;
     }
 
+    size_t dst_offset = 0;
+    uint8_t* src = buf;
+    uint8_t* end = src + len;
+
     // uncompress to increase output size to a multiple of 8
-    for (size_t i=0; (buf.size() & 7) && i < buf.size(); i++) {
-      auto p = buf[i];
-      if (p < 0x80 && p > 1) {
-        size_t to_add = 8 - (buf.size() & 7);
-        if (to_add >= p) to_add = p-1;
-        buf[i] = p - to_add;
-        buf.insert(buf.begin() + i + 1, to_add, 1);
-        i += to_add;
-      }
+    size_t to_add = len & 7;
+    if (to_add) {
+      to_add = 8 - to_add;
+      do {
+        auto p = *src++;
+        if (p < 0x80) {
+          while (p > 1) {
+            dst[dst_offset++ ^ 4] = 1;
+            --p;
+            if (--to_add == 0) break;
+          };
+        }
+        dst[dst_offset++ ^ 4] = p;
+      } while (to_add);
     }
 
-    if (buf.size() & 7) {
-      fprintf(stderr, "COMPRESSOR FAILED, output size %u\n", buf.size());
-      while(1) asm volatile("wfi");
+    // align dst
+    while (dst_offset & 7) {
+      dst[dst_offset++ ^ 4] = *src++;
     }
 
-    for (size_t i=0; i < buf.size(); i+= 8) {
-      memcpy(dst + 4, &buf[i+0], 4);
-      memcpy(dst + 0, &buf[i+4], 4);
+    dst += dst_offset;
+    while (src < end) {
+      ((uint32_t*)dst)[0] = ((uint32_t*)src)[1];
+      ((uint32_t*)dst)[1] = ((uint32_t*)src)[0];
       dst += 8;
+      src += 8;
     }
 
     last_pixel = 0;
-    buf.clear();
-    uncomp_size = 0;
-    comp_size = 0;
+    len = 0;
   }
 };
 
@@ -1241,17 +1219,15 @@ void FL2000::convert_compress8(slice_data *slice, uint32_t height) {
   const uint8_t* src = current_src - offset;
   uint8_t* dst = slice->data;
   bool doublestrike = current_mode.flags & VIDMODE_FLAG_LINEDOUBLE;
-  rle_compressor compress(width);
+  uint8_t comp_buf[width];
+  rle_compressor compress(comp_buf);
 
-  // last line of frame requires special handling, see blow
+  // last line of frame requires special handling, see below
   if (slice->last) --height;
 
   for (size_t i=0; i < height; i++) {
-    for (size_t j=0; j < width; j+=8) {
-      for (size_t k=0; k < 8; k++) {
-        compress.encode(src[offset++ & offset_mask]);
-      }
-//      compress.write(dst);
+    for (size_t j=0; j < width; j++) {
+      compress.encode(src[offset++ & offset_mask]);
     }
 
     compress.flush(dst);
@@ -1264,15 +1240,12 @@ void FL2000::convert_compress8(slice_data *slice, uint32_t height) {
   }
 
   if (slice->last) {
-    /* The very last data byte of a frame can't be a run. This is very difficult to predict
+    /* The last data byte of a frame can't be a run. This is very difficult to predict
      * due to the requirement of each compressed line being a multiple of 8 bytes in length,
      * so just shorten the last source line by 8 pixels then encode them as uncompressed.
      */
-    for (size_t j=0; j < width-8; j+=8) {
-      for (size_t k=0; k < 8; k++) {
-        compress.encode(src[offset++ & offset_mask]);
-      }
-//      compress.write(dst);
+    for (size_t j=0; j < width-8; j++) {
+      compress.encode(src[offset++ & offset_mask]);
     }
 
     compress.flush(dst);
