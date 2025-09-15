@@ -77,10 +77,11 @@ typedef union {
     uint32_t drop_cnt          :1;     // 13
     uint32_t use_vdi_itp_cnt   :1;     // 14
     uint32_t                   :9;     // 15
-    uint32_t compress          :1;     // 24
-    uint32_t v332_mode         :1;     // 25
+    uint32_t compress          :1;     // 24 run-length-encoding based on top bit of pixel value
+    uint32_t v332_mode         :1;     // 25 more accurately this is 8-bit pixel mode (used with palette)
     uint32_t color_palette_en  :1;     // 26
-    uint32_t first_bt_enc_en   :1;     // 27
+    uint32_t first_bt_enc_en   :1;     // 27 if the first data byte of frame has bits 1 or 4 set, all values are multiplied by 8 (mod 256)
+                                       //    (setting bit 3 seems to discard pixels / trigger underflows)
     uint32_t clear_125us_cnt   :1;     // 28
     uint32_t disable_halt      :1;     // 29
     uint32_t force_de_en       :1;     // 30
