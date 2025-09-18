@@ -1153,7 +1153,7 @@ public:
       }
       last_pixel = p;
     } else {
-      if (++repeat < 0x80)
+      if (++repeat <= 0x7F)
         return;
       p = 0x7F;
       repeat = 1;
@@ -1163,24 +1163,25 @@ public:
   }
 
   void flush(uint8_t* &dst) {
+    size_t dst_offset = 0;
+    uint8_t* src = buf;
+    uint8_t* end;
+
     while (repeat) {
       if ((len & 7) == 7) {
         buf[len++] = repeat;
         repeat = 0;
-        break;
+        end = src + len;
+        goto finish;
       }
       buf[len++] = 1;
       --repeat;
     }
 
-    size_t dst_offset = 0;
-    uint8_t* src = buf;
-    uint8_t* end = src + len;
-
+    end = src + len;
     // uncompress to increase output size to a multiple of 8
-    size_t to_add = len & 7;
-    if (to_add) {
-      to_add = 8 - to_add;
+    if (len & 7) {
+      size_t to_add = 8 - (len & 7);
       do {
         auto p = *src++;
         if (p < 0x80) {
@@ -1198,13 +1199,14 @@ public:
     while (dst_offset & 7) {
       dst[dst_offset++ ^ 4] = *src++;
     }
-
     dst += dst_offset;
+
+finish:
     while (src < end) {
-      ((uint32_t*)dst)[0] = ((uint32_t*)src)[1];
-      ((uint32_t*)dst)[1] = ((uint32_t*)src)[0];
-      dst += 8;
-      src += 8;
+      uint32_t b = *(uint32_t*)src; src += 4;
+      uint32_t a = *(uint32_t*)src; src += 4;
+      *(uint32_t*)dst = a; dst += 4;
+      *(uint32_t*)dst = b; dst += 4;
     }
 
     last_pixel = 0;
@@ -1250,10 +1252,16 @@ void FL2000::convert_compress8(slice_data *slice, uint32_t height) {
 
     compress.flush(dst);
     // copy final 8 pixels uncompressed
-    for (size_t j=0; j < 8; j++) {
-      dst[j^4] = (src[offset++ & offset_mask] >> 1) | 0x80;
-    }
-    dst += 8;
+    uint8_t e = src[offset++ & offset_mask];
+    uint8_t f = src[offset++ & offset_mask];
+    uint8_t g = src[offset++ & offset_mask];
+    uint8_t h = src[offset++ & offset_mask];
+    uint8_t a = src[offset++ & offset_mask];
+    uint8_t b = src[offset++ & offset_mask];
+    uint8_t c = src[offset++ & offset_mask];
+    uint8_t d = src[offset++ & offset_mask];
+    *(uint32_t*)dst = (d << 23) | (c << 15) | (b << 7) | (a >> 1) | 0x80808080; dst += 4;
+    *(uint32_t*)dst = (h << 23) | (g << 15) | (f << 7) | (e >> 1) | 0x80808080; dst += 4;
 
     if (doublestrike)
       slice->sg[height].wLength = dst - (uint8_t*)slice->sg[height].data;
