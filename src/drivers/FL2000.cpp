@@ -32,7 +32,6 @@
 #define I2C_RETRY_MAX           12
 
 #define I2C_ADDRESS_SEGMENT     0x30 // E-DDC segment index
-#define I2C_ADDRESS_DDC_CI      0x37
 #define I2C_ADDRESS_HDMI        0x4C
 #define I2C_ADDRESS_EDID        0x50
 
