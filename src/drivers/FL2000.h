@@ -50,7 +50,7 @@ enum notify_status {
 #define COLOR_FORMAT_RGB_24          0
 #define COLOR_FORMAT_RGB_16_565      1
 #define COLOR_FORMAT_RGB_16_555      2
-#define COLOR_FORMAT_RGB_8_332       3        // note this is not the "typical" 332 - it is RRGGGBBB
+#define COLOR_FORMAT_RGB_8_332       3            // note this is not the "typical" 332 - it is RRGGGBBB
 #define COLOR_FORMAT_RGB_8_INDEXED   4
 #define COLOR_FORMAT_COMPRESSED      0x40000000
 #define COLOR_FORMAT_NODMA           0x20000000   // this avoids using DMA to copy input framedata into USB slice buffers
@@ -131,10 +131,13 @@ private:
     DMARequest dma_req;
     std::vector<usb_bulkintr_sg> sg;
     bool last;
+    uint32_t id;
   } slices[2] = {
     {bulk_data[0]},
     {bulk_data[1]}
   };
+
+  void unplug(void);
 
   int reg_write(uint16_t offset, const uint32_t val);
   int reg_read(uint16_t offset, uint32_t& val);
@@ -204,8 +207,8 @@ public:
   // sets one or more palette entries, 32-bit value = 0x00RRGGBB
   int setPalette(uint8_t index, size_t count, const uint32_t* colors);
 
-  // fetches 128 bytes of EDID data, from the given block
-  int fetchEDID(int block, uint8_t *edid_data);
+  // fetches 128 bytes of EDID data from the given block
+  int fetchEDID(uint8_t block, uint8_t *edid_data);
 
   // helper function to find PLL parameters for specific frequencies
   static int calcTiming(const uint32_t freq, uint8_t& prescaler, uint8_t& mult, uint8_t& divisor);

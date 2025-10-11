@@ -107,6 +107,11 @@ struct pal_request : sync_request {
   size_t count;
 };
 
+struct edid_request : sync_request {
+  uint8_t block;
+  uint8_t *dst;
+};
+
 enum msg_cmd {
   CMD_ATTACH,
   CMD_DETACH,
@@ -117,6 +122,7 @@ enum msg_cmd {
   CMD_SET_NEXT_FRAME,
   CMD_SET_PALETTE,
   CMD_SEND_SLICE,
+  CMD_FETCH_EDID,
 };
 
 struct FL2000::threadMsg {
@@ -126,12 +132,25 @@ struct FL2000::threadMsg {
     mode_request* mode_req;
     frame_request* frame_req;
     pal_request* pal_req;
+    edid_request* edid_req;
     struct {
       FL2000::slice_data *s;
-      uint32_t id;
+      size_t len;
     } slice;
   };
 };
+
+FLASHMEM void FL2000::unplug(void) {
+  if (!monitor_plugged_in) return;
+  monitor_plugged_in = false;
+
+  // stop rendering
+  ++render_id;
+  // clear EDID so it gets detected as changed when replugged
+  memset(edid, 0, 8);
+  if (monitor_notify)
+    monitor_notify->triggerEvent(MONITOR_NOTIFY_DISCONNECTED);
+}
 
 void FL2000::thread(void) {
   threadMsg msgs[10];
@@ -173,12 +192,7 @@ void FL2000::thread(void) {
           break;
         case CMD_DETACH:
           dbg_log("Detach msg");
-          if (monitor_plugged_in) {
-            monitor_plugged_in = false;
-
-            if (monitor_notify)
-              monitor_notify->triggerEvent(MONITOR_NOTIFY_DISCONNECTED);
-          }
+          unplug();
           break;
         case CMD_SET_MODE:
           dbg_log("set mode msg");
@@ -190,18 +204,18 @@ void FL2000::thread(void) {
           atomSemPut(&msg.mode_req->sema);
           break;
         case CMD_SEND_SLICE:
-          send_slice(msg.slice.s, msg.slice.id);
+          send_slice(msg.slice.s, msg.slice.len);
           break;
         case CMD_SLICE_DONE:
           // make sure previous render context is still current
-          if (msg.slice.id == render_id) {
+          if (msg.slice.s->id == render_id) {
             begin_slice(msg.slice.s);
           } else {
             dbg_log("slice render_id mismatch");
           }
           break;
         case CMD_FRAME_DONE:
-          if (msg.slice.id == render_id) {
+          if (msg.slice.s->id == render_id) {
             status = frame_begin();
           } else {
             dbg_log("frame render_id mismatch");
@@ -229,6 +243,10 @@ void FL2000::thread(void) {
             }
           }
           atomSemPut(&msg.pal_req->sema);
+          break;
+        case CMD_FETCH_EDID:
+          msg.edid_req->result = read_edid_block(msg.edid_req->block, msg.edid_req->dst);
+          atomSemPut(&msg.edid_req->sema);
           break;
         default:
           dbg_log("Unknown command: %u", msg.cmd);
@@ -720,17 +738,9 @@ FLASHMEM int FL2000::process_interrupt(void) {
       if (monitor_notify)
         monitor_notify->triggerEvent(MONITOR_NOTIFY_CONNECTED);
     }
-  } else {
-    if (monitor_plugged_in) {
-      monitor_plugged_in = false;
-      reg_set(0x0078, 1<<17);
-
-      // stop rendering
-      ++render_id;
-
-      if (monitor_notify)
-        monitor_notify->triggerEvent(MONITOR_NOTIFY_DISCONNECTED);
-    }
+  } else if (monitor_plugged_in) {
+    reg_set(0x0078, 1<<17);
+    unplug();
   }
 
   return ret;
@@ -835,6 +845,24 @@ int FL2000::setPalette(uint8_t index, size_t count, const uint32_t *colors) {
   threadMsg msg = {
     .cmd = CMD_SET_PALETTE,
     .pal_req = &req
+  };
+
+  return forwardMsg(req, msg);
+}
+
+FLASHMEM int FL2000::fetchEDID(uint8_t block, uint8_t *edid_data) {
+  if (block==0 && memcmp(edid, "\0\xFF\xFF\xFF\xFF\xFF\xFF", 8)==0) {
+    memcpy(edid_data, edid, 128);
+    return 128;
+  }
+
+  edid_request req = {
+    .block = block,
+    .dst = edid_data
+  };
+  threadMsg msg = {
+    .cmd = CMD_FETCH_EDID,
+    .edid_req = &req
   };
 
   return forwardMsg(req, msg);
@@ -996,7 +1024,7 @@ void FL2000::convert_dma(slice_data* s, uint32_t height) {
       .cmd = CMD_SEND_SLICE,
       .slice = {
         .s = s,
-        .id = slice_size
+        .len = slice_size
       }
     };
     if (atomQueuePut(&workQueue, -1, &msg) != ATOM_OK) {
@@ -1544,6 +1572,9 @@ FLASHMEM int FL2000::set_mode(const struct mode_timing& mode, int32_t input_form
     cache_invalidate(slices[1].data, FL2000_SLICE_SIZE);
   }
 
+  slices[0].id = render_id;
+  slices[1].id = render_id;
+
   return frame_begin();
 }
 
@@ -1737,10 +1768,6 @@ void FL2000::begin_slice(slice_data* slice) {
 }
 
 void FL2000::send_slice(slice_data *slice, size_t slice_len) {
-  /* ensure render_id value is captured NOW, not used indirectly through "this"
-   * when the lambda is executed.
-   */
-  auto r_id = render_id;
   USBCallback slice_cb;
 
 
@@ -1762,7 +1789,7 @@ void FL2000::send_slice(slice_data *slice, size_t slice_len) {
         threadMsg msg = {
           .cmd = CMD_FRAME_DONE,
           .slice = {
-            .id = r_id
+            .s = slice
           }
         };
         if (atomQueuePut(&workQueue, -1, &msg) != ATOM_OK) {
@@ -1784,8 +1811,7 @@ void FL2000::send_slice(slice_data *slice, size_t slice_len) {
           threadMsg msg = {
             .cmd = CMD_SLICE_DONE,
             .slice = {
-              .s = slice,
-              .id = r_id,
+              .s = slice
             }
           };
           if (atomQueuePut(&workQueue, -1, &msg) != ATOM_OK) {
@@ -1840,19 +1866,9 @@ FLASHMEM int FL2000::calcTiming(const uint32_t freq, uint8_t& prescaler, uint8_t
     }
   }
 
-
   if (best_diff < 500000)
     return 0;
 
   errno = ERANGE;
-  return -1;
-}
-
-FLASHMEM int FL2000::fetchEDID(int block, uint8_t *edid_data) {
-  if (block==0 && memcmp(edid, "\0\xFF\xFF\xFF\xFF\xFF\xFF", 8)==0) {
-    memcpy(edid_data, edid, 128);
-    return 128;
-  }
-
   return -1;
 }
