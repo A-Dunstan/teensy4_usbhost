@@ -179,6 +179,7 @@ private:
 
   int hdmi_read_edid(uint8_t block, uint8_t* dst);
   int dsub_read_edid(uint8_t block, uint8_t* dst);
+  int read_edid_block(uint8_t block, uint8_t* dst);
   void update_edid(void);
 
   uint8_t bulk_data[2][FL2000_SLICE_SIZE] __attribute__((aligned(32)));

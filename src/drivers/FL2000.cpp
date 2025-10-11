@@ -29,7 +29,7 @@
 #define REQUEST_REG_READ        64
 #define REQUEST_REG_WRITE       65
 
-#define I2C_RETRY_MAX           10
+#define I2C_RETRY_MAX           12
 
 #define I2C_ADDRESS_SEGMENT     0x30 // E-DDC segment index
 #define I2C_ADDRESS_DDC_CI      0x37
@@ -324,6 +324,17 @@ FLASHMEM int FL2000::i2c_transfer(uint8_t address, uint8_t offset, bool read) {
     .edid_detect = 1,
   };
 
+  /* The problem with the FL2000's I2C implementation:
+   * the lowest two bits of the offset are always masked (transmitted as zero)
+   * and it _always_ reads/writes 4 bytes of data.
+   * This is fine for reading the EDID EEPROM but causes issues with anything else -
+   * all accesses to the HDMI chip end up reading/writing 4 registers at a time,
+   * and DDC/CI commands aren't possible at all due to being longer than 4 bytes.
+   *
+   * Read commands seem to operate like this: START | ADDRESS+W | OFFSET&~3 | (RE)START | ADDRESS+R | byte0 | byte1 | byte2 | byte3 | STOP
+   * Write commands operate like this:        START | ADDRESS+W | OFFSET&~3 | byte0 | byte1 | byte2 | byte3 | STOP
+   */
+
   int ret = reg_write(REG_I2C_CONTROL, ctrl.val);
   if (ret < 0)
     return ret;
@@ -505,8 +516,10 @@ FLASHMEM int FL2000::device_init(void) {
 
   // enable interrupt for I2C detection and external monitor
   reg_i2c_control i2c = {
+    .status = 0xF,
     .monitor_detect = 1,
-    .edid_detect = 1
+    .edid_detect = 1,
+    .complete = 1
   };
   ret = reg_set(REG_I2C_CONTROL, i2c.val);
   if (ret < 0) return ret;
@@ -560,7 +573,7 @@ FLASHMEM int FL2000::hdmi_read_edid(uint8_t block, uint8_t* dst) {
   /* FIFO is 32 bytes but the first 3 bytes are lost, so we start reading
    * 3 bytes before the data we actually want. This means the maximum read size
    * must be 3 bytes smaller than what the FIFO (32 bytes) can hold. */
-   dbg_log("Reading HDMI EDID...");
+  dbg_log("Reading HDMI EDID block %u...", block);
   while (p < end) {
     uint8_t to_read;
     size_t diff = end - p;
@@ -610,20 +623,46 @@ FLASHMEM int FL2000::hdmi_read_edid(uint8_t block, uint8_t* dst) {
 FLASHMEM int FL2000::dsub_read_edid(uint8_t block, uint8_t* dst) {
   uint32_t d;
   /* E-DDC defines register 0x30 as the segment selector index.
-   * It's meant to reset to 0 after every operation - don't trust this
-   * Don't check the result for block 0 because the device may not support it (return NACK)
+   * Each segment is 256 bytes, e.g. segment 0 = blocks 0+1, segment 1 = blocks 2+3...
+   * Most VGA monitors only have one block (block 0) but we may want to see if there's more data
+   * (typically it will be a 2Kb EEPROM which has 256 bytes / 2 blocks)
+   * So more than one segment over DSUB is uncommon and not really needed but the segment register
+   * is usually supported anyway.
+   * It's meant to reset to 0 after every command - don't trust this and _always_ write it
+   * Don't return an error if trying to set segment 0 because that only means the monitor can _only_ support segment 0
+   * Instead if the desired segment is not zero, try adding the segment to the address - this is how 24C08/24C16
+   * EEPROMS support up to 1 or 2KB of data using only 8-bit offsets.
+   * From testing, most monitors only support 256 bytes of EDID over DSUB: 128 bytes of data + 128 bytes of FF
+   * (or maybe they have identical data written to their EEPROMS multiple times).
    */
-  int ret = i2c_write_byte(I2C_ADDRESS_SEGMENT, 0, block);
-  if (ret < 0 && block) return ret;
+  uint8_t address = I2C_ADDRESS_EDID;
+  uint8_t segment = block / 2;
+  block = (block & 1) ? 128 : 0;
+  // we only want to write a single byte, but the I2C controller doesn't work like this... so write the same byte 5 times
+  int ret = i2c_write_dword(I2C_ADDRESS_SEGMENT, segment, 0x01010101*segment);
+  if (ret < 0 && segment) {
+    // well that didn't work, just add the segment to the address and pray
+    if (segment < 4)
+      address += segment;
+    else return ret;
+  }
 
+  auto p = dst;
   for (size_t i=0; i < 128; i += 4) {
-    ret = i2c_read_dword(I2C_ADDRESS_EDID, i, d);
+    ret = i2c_read_dword(address, i+block, d);
     if (ret < 0) return ret;
-    memcpy(dst+i, &d, 4);
+    memcpy(p, &d, ret);
+    p += ret;
     if (ret < 4) break;
   }
 
-  return 128;
+  return (int)(p - dst);
+}
+
+FLASHMEM int FL2000::read_edid_block(uint8_t block, uint8_t* dst) {
+  if (has_ITE66121)
+    return hdmi_read_edid(block, dst);
+  return dsub_read_edid(block, dst);
 }
 
 FLASHMEM void FL2000::update_edid(void) {
@@ -631,12 +670,8 @@ FLASHMEM void FL2000::update_edid(void) {
 
   // attempt to read EDID block
   auto s_tick = ARM_DWT_CYCCNT;
-  if (has_ITE66121) {
-    hdmi_read_edid(0, new_edid);
-  } else { // read EDID from DSUB
-    dsub_read_edid(0, new_edid);
-  }
-  dbg_log("Time to read EDID: %.2fms", (double)(ARM_DWT_CYCCNT - s_tick) / (F_CPU_ACTUAL / 1000));
+  read_edid_block(0, new_edid);
+  dbg_log("Time to read EDID page 0: %.2fms", (double)(ARM_DWT_CYCCNT - s_tick) / (F_CPU_ACTUAL / 1000));
   // verify checksum
   uint8_t sum = 0;
   for (size_t i=0; i < 128; i++) {
