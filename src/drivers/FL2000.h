@@ -92,7 +92,7 @@ private:
 
   ATOM_TCB workThread;
   ATOM_QUEUE workQueue;
-  uint32_t workStack[512];
+  uint32_t workStack[640];
   void thread(void);
   static void threadStart(uint32_t arg);
 

@@ -63,7 +63,7 @@ static const struct mode_timing vid_modes[] PROGMEM = {
   {  400,    300,     60,      528,     64,     44,   628,     4,      23,   1,    8,   4, VIDMODE_FLAG_LINEDOUBLE|VIDMODE_FLAG_HSYNC_POS|VIDMODE_FLAG_VSYNC_POS},
   {  400,    600,     56,      512,     64,     36,   625,     2,      22,   1,   18,  10, VIDMODE_FLAG_HSYNC_POS|VIDMODE_FLAG_VSYNC_POS},
   {  512,    384,     60,      672,     80,     68,   806,     3,      29,   1,   13,   4, VIDMODE_FLAG_LINEDOUBLE},
-  {  512,    480,     60,      672,     80,     68,   525,     2,      33,   2,  127,  30, 0},
+  {  512,    480,     60,      672,     80,     40,   525,     2,      33,   2,  127,  30, 0},
   {  640,    350,     70,      800,     96,     48,   449,     2,      60,   1,   73,  29, VIDMODE_FLAG_HSYNC_POS},
   {  640,    200,     70,      800,     96,     48,   449,     2,      35,   1,   73,  29, VIDMODE_FLAG_LINEDOUBLE|VIDMODE_FLAG_VSYNC_POS},
   {  640,    400,     70,      800,     96,     48,   449,     2,      35,   1,   73,  29, VIDMODE_FLAG_VSYNC_POS},
@@ -80,6 +80,7 @@ static const struct mode_timing vid_modes[] PROGMEM = {
   {  848,    480,     60,      1060,    128,    64,   525,     2,      33,   1,   45,  12, 0},
   { 1024,    600,     60,      1352,    164,   112,   628,     4,      23,   2,  123,  12, VIDMODE_FLAG_HSYNC_POS|VIDMODE_FLAG_VSYNC_POS},
   { 1024,    768,     60,      1344,    136,   160,   806,     6,      29,   1,   13,   2, 0},
+  { 1280,    720,     30,      1650,     40,   220,   750,     5,      20,   1,   26,   7, VIDMODE_FLAG_HSYNC_POS|VIDMODE_FLAG_VSYNC_POS},
   { 1280,   1024,     60,      1688,    112,   248,   1066,    3,      38,   1,   54,   5, VIDMODE_FLAG_HSYNC_POS|VIDMODE_FLAG_VSYNC_POS},
 };
 
@@ -1355,7 +1356,7 @@ FLASHMEM int FL2000::set_mode(const struct mode_timing& mode, int32_t input_form
   if (mode.active_width & 7)
     return -EINVAL;
 
-  if (mode.active_width > 1280)
+  if (mode.active_width > 1920)
     return -EINVAL;
 
   if (input_format == COLOR_FORMAT_AUTO) {
