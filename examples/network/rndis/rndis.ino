@@ -34,7 +34,6 @@ EthernetUDP udp;
 uint8_t buf[48];
 
 static DMAMEM TeensyUSBHost2 usb;
-extern USB_RNDIS& rndis(void);
 
 // --------------------------------------------------------------------------
 //  Main Program
