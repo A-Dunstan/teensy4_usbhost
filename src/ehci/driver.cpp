@@ -63,6 +63,14 @@ USB_Driver* USB_Driver::Factory::find_driver(const usb_interface_descriptor *id,
   return NULL;
 }
 
+int USB_Driver::ControlMessage(uint8_t bmRequestType, uint8_t bmRequest, uint16_t wValue, uint16_t wIndex, uint16_t wLength, const void *data, const USBCallback* cb_func) {
+  if (bmRequestType & USB_CTRLTYPE_DIR_DEVICE2HOST) {
+    errno = EFAULT;
+    return -1;
+  }
+  return ControlMessage(bmRequestType, bmRequest, wValue, wIndex, wLength, const_cast<void*>(data), cb_func);
+}
+
 int USB_Driver::ControlMessage(uint8_t bmRequestType, uint8_t bmRequest, uint16_t wValue, uint16_t wIndex, uint16_t wLength, void *data, const USBCallback* cb_func) {
   usb_msg_t msg = {
     .type = USB_MSG_DEVICE_CONTROL_TRANSFER,
@@ -87,9 +95,21 @@ int USB_Driver::ControlMessage(uint8_t bmRequestType, uint8_t bmRequest, uint16_
   return -1;
 }
 
+int USB_Driver::ControlMessage(uint8_t bmRequestType, uint8_t bmRequest, uint16_t wValue, uint16_t wIndex, uint16_t wLength, const void *data, const USBCallback &cb_func) {
+  return ControlMessage(bmRequestType,bmRequest,wValue,wIndex,wLength,data,&cb_func);
+}
+
 int USB_Driver::ControlMessage(uint8_t bmRequestType, uint8_t bmRequest, uint16_t wValue, uint16_t wIndex, uint16_t wLength, void *data, const USBCallback &cb_func) {
   // control callback is always copied (see pushMessage) so don't need to clone it here
   return ControlMessage(bmRequestType,bmRequest,wValue,wIndex,wLength,data,&cb_func);
+}
+
+int USB_Driver::BulkMessage(uint8_t bEndpoint, uint32_t dLength, const void *data, const USBCallback* cb_func) {
+  if (bEndpoint & 0x80) {
+    errno = EFAULT;
+    return -1;
+  }
+  return BulkMessage(bEndpoint, dLength, const_cast<void*>(data), cb_func);
 }
 
 int USB_Driver::BulkMessage(uint8_t bEndpoint, uint32_t dLength, void *data, const USBCallback* cb_func) {
@@ -133,6 +153,14 @@ int USB_Driver::BulkMessage(uint8_t bEndpoint, const usb_bulkintr_sg* sg, const 
   return -1;
 }
 
+int USB_Driver::InterruptMessage(uint8_t bEndpoint, uint16_t wLength, const void *data, const USBCallback* cb_func) {
+  if (bEndpoint & 0x80) {
+    errno = EFAULT;
+    return -1;
+  }
+  return InterruptMessage(bEndpoint, wLength, const_cast<void*>(data), cb_func);
+}
+
 int USB_Driver::InterruptMessage(uint8_t bEndpoint, uint16_t wLength, void *data, const USBCallback* cb_func) {
   usb_msg_t msg = {
     .type = USB_MSG_DEVICE_INTERRUPT_TRANSFER,
@@ -152,6 +180,14 @@ int USB_Driver::InterruptMessage(uint8_t bEndpoint, uint16_t wLength, void *data
     errno = ENOMEM;
   }
   return -1;
+}
+
+int USB_Driver::IsochronousMessage(uint8_t bEndpoint, isolength& Lengths, const void *data, const USBCallback* cb_func) {
+  if (bEndpoint & 0x80) {
+    errno = EFAULT;
+    return -1;
+  }
+  return IsochronousMessage(bEndpoint, Lengths, const_cast<void*>(data), cb_func);
 }
 
 int USB_Driver::IsochronousMessage(uint8_t bEndpoint, isolength& Lengths, void *data, const USBCallback* cb_func) {
@@ -195,16 +231,40 @@ static int MessageWrapper(USBCallback& user_cb, const req_fn& req) {
   return ret;
 }
 
+int USB_Driver::BulkMessage(uint8_t bEndpoint, uint32_t dLength, const void *data, USBCallback cb_func) {
+  if (bEndpoint & 0x80) {
+    errno = EFAULT;
+    return -1;
+  }
+  return BulkMessage(bEndpoint, dLength, const_cast<void*>(data), cb_func);
+}
+
 int USB_Driver::BulkMessage(uint8_t bEndpoint, uint32_t dLength, void *data, USBCallback cb_func) {
   return MessageWrapper(cb_func, [&](const USBCallback* cb)->int {
     return BulkMessage(bEndpoint, dLength, data, cb);
   });
 }
 
+int USB_Driver::InterruptMessage(uint8_t bEndpoint, uint16_t wLength, const void *data, USBCallback cb_func) {
+  if (bEndpoint & 0x80) {
+    errno = EFAULT;
+    return -1;
+  }
+  return InterruptMessage(bEndpoint, wLength, const_cast<void*>(data), cb_func);
+}
+
 int USB_Driver::InterruptMessage(uint8_t bEndpoint, uint16_t wLength, void *data, USBCallback cb_func) {
   return MessageWrapper(cb_func, [&](const USBCallback* cb)->int {
     return InterruptMessage(bEndpoint, wLength, data, cb);
   });
+}
+
+int USB_Driver::IsochronousMessage(uint8_t bEndpoint, isolength& Lengths, const void *data, USBCallback cb_func) {
+  if (bEndpoint & 0x80) {
+    errno = EFAULT;
+    return -1;
+  }
+  return IsochronousMessage(bEndpoint, Lengths, const_cast<void*>(data), cb_func);
 }
 
 int USB_Driver::IsochronousMessage(uint8_t bEndpoint, isolength& Lengths, void *data, USBCallback cb_func) {
@@ -220,7 +280,17 @@ int USB_Driver::BulkMessage(uint8_t bEndpoint, const usb_bulkintr_sg* sg, USBCal
 }
 
 // synchronous functions - not implemented here, these use weak symbols so they can be overridden using OS specific code
-__attribute__((weak)) int USB_Driver::ControlMessage(uint8_t bmRequestType, uint8_t bmRequest, uint16_t wValue, uint16_t wIndex, uint16_t wLength, void *data) {
+__attribute__((weak)) int USB_Driver::ControlMessage(uint8_t, uint8_t, uint16_t, uint16_t, uint16_t, const void*) {
+  errno = ENOSYS;
+  return -1;
+}
+
+__attribute__((weak)) int USB_Driver::ControlMessage(uint8_t, uint8_t, uint16_t, uint16_t, uint16_t, void*) {
+  errno = ENOSYS;
+  return -1;
+}
+
+__attribute__((weak)) int USB_Driver::BulkMessage(uint8_t,uint32_t,const void*) {
   errno = ENOSYS;
   return -1;
 }
@@ -230,7 +300,17 @@ __attribute__((weak)) int USB_Driver::BulkMessage(uint8_t,uint32_t,void*) {
   return -1;
 }
 
+__attribute__((weak)) int USB_Driver::InterruptMessage(uint8_t,uint16_t,const void*) {
+  errno = ENOSYS;
+  return -1;
+}
+
 __attribute__((weak)) int USB_Driver::InterruptMessage(uint8_t,uint16_t,void*) {
+  errno = ENOSYS;
+  return -1;
+}
+
+__attribute__((weak)) int USB_Driver::IsochronousMessage(uint8_t,isolength&,const void*) {
   errno = ENOSYS;
   return -1;
 }

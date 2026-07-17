@@ -298,10 +298,26 @@ static int sync_message(const USB_Device* dev, const req_fn& req) {
   return result;
 }
 
+int USB_Driver::ControlMessage(uint8_t bmRequestType, uint8_t bmRequest, uint16_t wValue, uint16_t wIndex, uint16_t wLength, const void *data) {
+  if (bmRequestType & USB_CTRLTYPE_DIR_DEVICE2HOST) {
+    errno = EFAULT;
+    return -1;
+  }
+  return ControlMessage(bmRequestType, bmRequest, wValue, wIndex, wLength, const_cast<void*>(data));
+}
+
 int USB_Driver::ControlMessage(uint8_t bmRequestType, uint8_t bmRequest, uint16_t wValue, uint16_t wIndex, uint16_t wLength, void *data) {
   return sync_message(getDevice(), [&](const USBCallback* cb)->int {
     return ControlMessage(bmRequestType, bmRequest, wValue, wIndex, wLength, data, cb);
   });
+}
+
+int USB_Driver::BulkMessage(uint8_t bEndpoint, uint32_t dLength, const void *data) {
+  if (bEndpoint & 0x80) {
+    errno = EFAULT;
+    return -1;
+  }
+  return BulkMessage(bEndpoint, dLength, const_cast<void*>(data));
 }
 
 int USB_Driver::BulkMessage(uint8_t bEndpoint, uint32_t dLength, void *data) {
@@ -310,10 +326,26 @@ int USB_Driver::BulkMessage(uint8_t bEndpoint, uint32_t dLength, void *data) {
   });
 }
 
+int USB_Driver::InterruptMessage(uint8_t bEndpoint, uint16_t wLength, const void *data) {
+  if (bEndpoint & 0x80) {
+    errno = EFAULT;
+    return -1;
+  }
+  return InterruptMessage(bEndpoint, wLength, const_cast<void*>(data));
+}
+
 int USB_Driver::InterruptMessage(uint8_t bEndpoint, uint16_t wLength, void *data) {
   return sync_message(getDevice(), [&](const USBCallback* cb)->int {
     return InterruptMessage(bEndpoint, wLength, data, cb);
   });
+}
+
+int USB_Driver::IsochronousMessage(uint8_t bEndpoint, isolength& Lengths, const void *data) {
+  if (bEndpoint & 0x80) {
+    errno = EFAULT;
+    return -1;
+  }
+  return IsochronousMessage(bEndpoint, Lengths, const_cast<void*>(data));
 }
 
 int USB_Driver::IsochronousMessage(uint8_t bEndpoint, isolength& Lengths, void *data) {

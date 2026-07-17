@@ -62,21 +62,51 @@ protected:
    * Regular messages take a single consecutive buffer which will be broken into multiple transfers if neccessary.
    */
   // asynchronous, temporary callback object
+  int ControlMessage(uint8_t bmRequestType, uint8_t bmRequest, uint16_t wValue, uint16_t wIndex, const USBCallback& cb) {
+    return ControlMessage(bmRequestType, bmRequest, wValue, wIndex, 0, (void*)NULL, cb);
+  }
   int ControlMessage(uint8_t bmRequestType, uint8_t bmRequest, uint16_t wValue, uint16_t wIndex, uint16_t wLength, void *data, const USBCallback&);
+  int ControlMessage(uint8_t bmRequestType, uint8_t bmRequest, uint16_t wValue, uint16_t wIndex, uint16_t wLength, const void *data, const USBCallback&);
+  int BulkMessage(uint8_t bEndpoint, USBCallback cb) {
+    return BulkMessage(bEndpoint, 0, (void*)NULL, cb);
+  }
+  int BulkMessage(uint8_t bEndpoint, uint32_t dLength, const void *data, USBCallback);
   int BulkMessage(uint8_t bEndpoint, uint32_t dLength, void *data, USBCallback);
+  int InterruptMessage(uint8_t bEndpoint, uint16_t wLength, const void *data, USBCallback);
   int InterruptMessage(uint8_t bEndpoint, uint16_t wLength, void *data, USBCallback);
+  int IsochronousMessage(uint8_t bEndpoint, isolength&, const void *data, USBCallback);
   int IsochronousMessage(uint8_t bEndpoint, isolength&, void *data, USBCallback);
   int BulkMessage(uint8_t bEndpoint, const usb_bulkintr_sg *sg, USBCallback);
   // asynchronous, callback pointer
+  int ControlMessage(uint8_t bmRequestType, uint8_t bmRequest, uint16_t wValue, uint16_t wIndex, const USBCallback* cb) {
+    return ControlMessage(bmRequestType, bmRequest, wValue, wIndex, 0, (void*)NULL, cb);
+  }
+  int ControlMessage(uint8_t bmRequestType, uint8_t bmRequest, uint16_t wValue, uint16_t wIndex, uint16_t wLength, const void *data, const USBCallback*);
   int ControlMessage(uint8_t bmRequestType, uint8_t bmRequest, uint16_t wValue, uint16_t wIndex, uint16_t wLength, void *data, const USBCallback*);
+  int BulkMessage(uint8_t bEndpoint, const USBCallback* cb) {
+    return BulkMessage(bEndpoint, 0, (void*)NULL, cb);
+  }
+  int BulkMessage(uint8_t bEndpoint, uint32_t dLength, const void *data, const USBCallback*);
   int BulkMessage(uint8_t bEndpoint, uint32_t dLength, void *data, const USBCallback*);
+  int InterruptMessage(uint8_t bEndpoint, uint16_t wLength, const void *data, const USBCallback*);
   int InterruptMessage(uint8_t bEndpoint, uint16_t wLength, void *data, const USBCallback*);
   int IsochronousMessage(uint8_t bEndpoint, isolength&, void *data, const USBCallback*);
+  int IsochronousMessage(uint8_t bEndpoint, isolength&, const void *data, const USBCallback*);
   int BulkMessage(uint8_t bEndpoint, const usb_bulkintr_sg *sg, const USBCallback*);
   // synchronous
+  int ControlMessage(uint8_t bmRequestType, uint8_t bmRequest, uint16_t wValue, uint16_t wIndex) {
+    return ControlMessage(bmRequestType, bmRequest, wValue, wIndex, 0, (void*)NULL);
+  }
+  int ControlMessage(uint8_t bmRequestType, uint8_t bmRequest, uint16_t wValue, uint16_t wIndex, uint16_t wLength, const void *data);
   int ControlMessage(uint8_t bmRequestType, uint8_t bmRequest, uint16_t wValue, uint16_t wIndex, uint16_t wLength, void *data);
+  int BulkMessage(uint8_t bEndpoint) {
+    return BulkMessage(bEndpoint, 0, (void*)NULL);
+  }
+  int BulkMessage(uint8_t bEndpoint, uint32_t dLength, const void *data);
   int BulkMessage(uint8_t bEndpoint, uint32_t dLength, void *data);
+  int InterruptMessage(uint8_t bEndpoint, uint16_t wLength, const void *data);
   int InterruptMessage(uint8_t bEndpoint, uint16_t wLength, void *data);
+  int IsochronousMessage(uint8_t bEndpoint, isolength&, const void *data);
   int IsochronousMessage(uint8_t bEndpoint, isolength&, void *data);
 };
 

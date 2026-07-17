@@ -254,7 +254,7 @@ void serial::set_dtr_rts(uint8_t new_status) {
   if (hw_flow) new_status |= CH341_STATUS_RTS;
   if (attached && new_status != out_status) {
     USBCallback fn( [=](int r) { dtr_rts_callback(r, out_status, new_status);} );
-    if (ControlMessage(CH341_CONTROL_OUT, CH341_REQ_MODEM_CTRL, ~new_status, 0, 0, NULL, fn) >= 0)
+    if (ControlMessage(CH341_CONTROL_OUT, CH341_REQ_MODEM_CTRL, ~new_status, 0, fn) >= 0)
       out_status = new_status;
   }
 }
@@ -298,16 +298,16 @@ void serial::init(int result, unsigned int stage) {
       memcpy(&version, status_in, sizeof(version));
       dprintf("CH341 version: %04X\n", version);
       // initialize device to UART mode, set mode and baudrate
-      ControlMessage(CH341_CONTROL_OUT, CH341_REQ_SERIAL_INIT, (lcr<<8)|0xC09C, (factor<<8)|divisor|0x80, 0, NULL, fn);
+      ControlMessage(CH341_CONTROL_OUT, CH341_REQ_SERIAL_INIT, (lcr<<8)|0xC09C, (factor<<8)|divisor|0x80, fn);
       break;
     case 2:
       // unknown register pokes - REG_F might be related to more accurate baud timing (see FreeBSD driver...)
-      ControlMessage(CH341_CONTROL_OUT, CH341_REQ_WRITE_2REG, (CH341_REG_F<<8)|CH341_REG_2C, 0x0007, 0, NULL, fn);
+      ControlMessage(CH341_CONTROL_OUT, CH341_REQ_WRITE_2REG, (CH341_REG_F<<8)|CH341_REG_2C, 0x0007, fn);
       break;
     case 3:
       // the write command always writes to two registers so I think this is how you write to only one register
       // this supposedly enables hardware flow control (RTS/CTS), I have verified this at least disables tx whilst CTS is clear...
-      ControlMessage(CH341_CONTROL_OUT, CH341_REQ_WRITE_2REG, (CH341_REG_FLOW_CONTROL<<8)|CH341_REG_FLOW_CONTROL, hw_flow ? 0x0101:0, 0, NULL, fn);
+      ControlMessage(CH341_CONTROL_OUT, CH341_REQ_WRITE_2REG, (CH341_REG_FLOW_CONTROL<<8)|CH341_REG_FLOW_CONTROL, hw_flow ? 0x0101:0, fn);
       break;
     case 4:
       // get current port status
@@ -451,10 +451,10 @@ void serial::begin(uint32_t baud, uint16_t format, bool rts_cts) {
   if (!attached) return;
 
   if (oldfactor != factor || olddivisor != divisor || oldlcr != lcr) {
-    ControlMessage(CH341_CONTROL_OUT, CH341_REQ_SERIAL_INIT, (lcr<<8)|0xC09C, (factor<<8)|divisor|0x80, 0, NULL);
+    ControlMessage(CH341_CONTROL_OUT, CH341_REQ_SERIAL_INIT, (lcr<<8)|0xC09C, (factor<<8)|divisor|0x80);
   }
   if (flow != hw_flow) {
-    ControlMessage(CH341_CONTROL_OUT, CH341_REQ_WRITE_2REG, (CH341_REG_FLOW_CONTROL<<8)|CH341_REG_FLOW_CONTROL, hw_flow ? 0x0101:0, 0, NULL);
+    ControlMessage(CH341_CONTROL_OUT, CH341_REQ_WRITE_2REG, (CH341_REG_FLOW_CONTROL<<8)|CH341_REG_FLOW_CONTROL, hw_flow ? 0x0101:0);
   }
 
   start();

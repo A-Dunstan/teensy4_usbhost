@@ -52,7 +52,7 @@ const typename ccommand::response_t* USB_RNDIS::sendCommand(const ccommand& cmd,
    * instead the command gets queued here, then the lock gets released while we wait for the response
    * signal.
    */
-  if (ControlMessage(USB_REQTYPE_INTERFACE_SET|USB_CTRLTYPE_TYPE_CLASS, CDC_CMD_SEND_ENCAPSULATED, 0, control_interface, cmd.MessageLength, const_cast<ccommand*>(&cmd), send_cb) < 0) {
+  if (ControlMessage(USB_REQTYPE_INTERFACE_SET|USB_CTRLTYPE_TYPE_CLASS, CDC_CMD_SEND_ENCAPSULATED, 0, control_interface, cmd.MessageLength, &cmd, send_cb) < 0) {
     puts("Failed to queue command for sending\n");
     return NULL;
   }
@@ -365,7 +365,7 @@ void USB_RNDIS::threadproc(void) {
         break;
       case DRIVER_MSG_KEEPALIVE_REQUEST:
         {
-          rndis_msg_keepalive_cmplt kc = {
+          const rndis_msg_keepalive_cmplt kc = {
             .MessageType = RNDIS_MSG_KEEPALIVE_CMPLT,
             .MessageLength = sizeof(rndis_msg_keepalive_cmplt),
             .RequestID = msg.RequestID,
