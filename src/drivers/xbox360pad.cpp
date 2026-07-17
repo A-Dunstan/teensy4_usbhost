@@ -40,6 +40,10 @@ void XBOX360Pad::interrupt_in(int r) {
       case 1: // response to output report 1, returns LED state
         if (r >= 3) {
           dprintf("XBOX LED state: %02X\n", rep_in[2]);
+          if (rep_in[2] != led) {
+            // set it again because it didn't listen
+            setLED(led);
+          }
         }
         break;
       // these have all been observed to have a length of 3
@@ -72,9 +76,9 @@ void XBOX360Pad::interrupt_out(int r) {
 FLASHMEM void XBOX360Pad::setLED(uint8_t new_led) {
   atomMutexGet(&lock, 10);
 
+  led = new_led;
   if (flags & FLAG_INPROGRESS) {
     flags |= FLAG_SETLED;
-    led = new_led;
   } else {
     flags |= FLAG_INPROGRESS;
     rep_out[0] = 1;
