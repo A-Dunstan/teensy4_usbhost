@@ -20,6 +20,7 @@
 #include "log.h"
 #include "config.h"
 #include <cstring>
+#include <cstdlib>
 
 #define QTD_PTR_INVALID      ((usb_qTD_t*)1)
 #define IS_QTD_PTR_VALID(p)  ((((uint32_t)p) & 0x1F)==0)
