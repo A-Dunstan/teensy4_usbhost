@@ -28,13 +28,13 @@
 class USB_Host : protected USB_Hub, private CCallback<usb_control_transfer>, public PeriodicScheduler {
 private:
   usb_ehci_cmd_t* const EHCI;
-  uint32_t addresses[128/32];
+  uint32_t addresses[128/32] = {1}; // reserve address 0
   const uint8_t nPorts;
   uint8_t uframe_bandwidth[PERIODIC_LIST_SIZE*8];
 
-  USB_Endpoint *endpoints;
-  USB_Endpoint *async_cleanup;
-  USB_Endpoint *periodic_cleanup;
+  USB_Endpoint *endpoints = &Enum;
+  USB_Endpoint *async_cleanup = NULL;
+  USB_Endpoint *periodic_cleanup = NULL;
 
   class Enum_Control : public USB_Control_Endpoint {
   public:

@@ -556,15 +556,7 @@ USB_Host::USB_Host(usb_ehci_base_t* const base) :
 USB_Hub(0),
 PeriodicScheduler(((usb_ehci_cmd_t*)((uint8_t*)base + base->CAPLENGTH))->FRINDEX),
 EHCI((usb_ehci_cmd_t*)((uint8_t*)base + base->CAPLENGTH)),
-nPorts(base->HCSPARAMS.N_PORTS)
-{
-  memset(addresses, 0, sizeof(addresses));
-  // reserve address 0
-  addresses[0] = 1;
-  endpoints = &Enum;
-  async_cleanup = NULL;
-  periodic_cleanup = NULL;
-}
+nPorts(base->HCSPARAMS.N_PORTS) {}
 
 void USB_Host::usb_process(void) {
   dprintf("begin ehci reset (%d root ports)", nPorts);
