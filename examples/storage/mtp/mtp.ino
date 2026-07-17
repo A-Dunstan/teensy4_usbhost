@@ -14,16 +14,17 @@ static DMAMEM TeensyUSBHost2 usb;
 static USB_FAT_Volume USBVol;
 
 FLASHMEM void setup() {
+  MTP.begin();
+
   Serial.begin(0);
-  for (elapsedMillis t = 0; t < 5000;) {
-    if (Serial) break;
-  }
+  elapsedMillis t = 0;
+  do {
+    MTP.loop(); // get rid of thread-unsafe interval timer ASAP
+  } while (t < 5000);
 
   if (CrashReport) CrashReport.printTo(Serial);
 
   usb.begin();
-  MTP.begin();
-  MTP.loop(); // get rid of thread-unsafe interval timer ASAP
   pinMode(LED_BUILTIN, OUTPUT);
   delay(1000);
   MTP.addFilesystem(USBVol, "USB FAT Volume");
