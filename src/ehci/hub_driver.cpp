@@ -33,8 +33,8 @@ private:
   const uint8_t status_ep;
   const uint8_t hs_port;
   // atomic refcount not needed, all access comes from the USB_Host thread
-  unsigned int refcount;
-  uint8_t bNbrPorts;
+  unsigned int refcount = 1;
+  uint8_t bNbrPorts = 0;
   uint8_t __attribute__((aligned(CACHE_LINE_SIZE))) port_change[32];
 
   USB_Hub_Driver(USB_Device*,uint8_t status);
@@ -62,9 +62,6 @@ public:
 USB_Hub_Driver::USB_Hub_Driver(USB_Device *d, uint8_t status) :
 USB_Driver_FactoryGlue<USB_Hub_Driver>(d),
 USB_Hub(d->speed==2 ? d->address : d->hub_addr),dev(d),status_ep(status),hs_port(d->speed==2 ? 16 : d->port) {
-  refcount = 1;
-  // get the hub descriptor
-  bNbrPorts = 0;
   dprintf("Attempting to get HUB descriptor...\n");
   dev->ControlTransfer(USB_CTRLTYPE_DIR_DEVICE2HOST|USB_CTRLTYPE_TYPE_CLASS|USB_CTRLTYPE_REC_DEVICE, \
     USB_REQ_GET_DESCRIPTOR, USB_DT_HUB<<8, 0, 255, NULL, this);
@@ -246,10 +243,6 @@ void USB_Hub_Driver::addref(void) {
 }
 
 void USB_Hub_Driver::deref(void) {
-  if (refcount==0) {
-    dprintf("USB_Hub_Driver<%p> deref while refcount==0\n", this);
-    *((uint32_t*)0) = 1;
-  }
   if (--refcount == 0) {
     dprintf("USB_Hub_Driver<%p> deleted\n", this);
     delete this;
