@@ -86,6 +86,12 @@ private:
 
 public:
   bool pushMessage(usb_msg_t&);
+  uint8_t getSpeed(void) const { return speed; }
+  uint8_t getAddress(void) const { return address; }
+  uint8_t getHubAddr(void) const { return hub_addr; }
+  uint8_t getPort(void) const { return port; }
+  uint16_t getVID(void) const { return ddesc.idVendor; }
+  uint16_t getPID(void) const { return ddesc.idProduct; }
 };
 
 
