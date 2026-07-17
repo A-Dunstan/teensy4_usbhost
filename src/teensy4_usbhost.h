@@ -44,7 +44,7 @@ class USBHostBase : public USB_Host {
   uint32_t getMillis(void) override;
 
 private:
-  ATOM_QUEUE &usbqueue;
+  ATOM_QUEUE usbqueue;
 
   class TimerMsg : public ATOM_TIMER {
     static void timer_callback(POINTER cb_data);
@@ -56,7 +56,7 @@ private:
     TimerMsg(const usb_msg_t &_msg, uint32_t ms, USBHostBase &h);
     ~TimerMsg();
   };
-  std::atomic<TimerMsg*> timerRelease;
+  std::atomic<TimerMsg*> timerRelease = NULL;
 
   ATOM_TCB usb_thread;
   uint32_t usb_stack[USB_STACK_SIZE];
@@ -64,7 +64,7 @@ private:
   static void thread_start(thread_param_t _p);
 
 protected:
-  USBHostBase(ATOM_QUEUE&, usb_ehci_base_t*);
+  USBHostBase(usb_ehci_base_t* ehci) : USB_Host(ehci) {}
   static void init_pll(struct REG32_QUAD_t *const PLL);
   static void phy_on(struct usb_phy_t *const PHY);
 
@@ -73,7 +73,7 @@ public:
   static bool isUSBThread(const USB_Device*);
 };
 
-template <IRQ_NUMBER_t irq, uint32_t phy, uint32_t ehci, uint32_t pll>
+template <class usb_inst>
 class TeensyUSB : public USBHostBase {
   void nextIRQ(void) override;
   void setHostMode(void) override;
@@ -84,31 +84,48 @@ class TeensyUSB : public USBHostBase {
   static const size_t OFFSET_EHCI_USBMODE = 0x1A8;
 
   // static so it is usable by the ISR
-  static ATOM_QUEUE g_usbqueue;
+  static USB_Host* host;
   static void usb_isr(void);
 
 protected:
   void thread(void) override;
-
-  TeensyUSB() :
-  USBHostBase(g_usbqueue, (usb_ehci_base_t*)(ehci+OFFSET_EHCI_CAPLENGTH)) {}
+  TeensyUSB();
 };
 
-template <IRQ_NUMBER_t irq, uint32_t phy, uint32_t ehci, uint32_t pll>
-DMAMEM ATOM_QUEUE TeensyUSB<irq,phy,ehci,pll>::g_usbqueue;
+template <class c>
+USB_Host* TeensyUSB<c>::host;
 
-class TeensyUSBHost1 : public TeensyUSB<IRQ_USB1, IMXRT_USBPHY1_ADDRESS, IMXRT_USB1_ADDRESS, IMXRT_CCM_ANALOG_ADDRESS+0x10> {
+extern template class TeensyUSB<class TeensyUSBHost1>;
+extern template class TeensyUSB<class TeensyUSBHost2>;
+
+class TeensyUSBHost1 : public TeensyUSB<TeensyUSBHost1> {
+  friend class TeensyUSB<TeensyUSBHost1>;
+
+  static const IRQ_NUMBER_t irq = IRQ_USB1;
+  static const uint32_t phy = IMXRT_USBPHY1_ADDRESS;
+  static const uint32_t ehci = IMXRT_USB1_ADDRESS;
+  static const uint32_t pll = IMXRT_CCM_ANALOG_ADDRESS+0x10;
+
 public:
-  TeensyUSBHost1();
+  TeensyUSBHost1() = default;
 };
 
-class TeensyUSBHost2 : public TeensyUSB<IRQ_USB2, IMXRT_USBPHY2_ADDRESS, IMXRT_USB2_ADDRESS, IMXRT_CCM_ANALOG_ADDRESS+0x20> {
+class TeensyUSBHost2 : public TeensyUSB<TeensyUSBHost2> {
+  friend class TeensyUSB<TeensyUSBHost2>;
+
+  static const IRQ_NUMBER_t irq = IRQ_USB2;
+  static const uint32_t phy = IMXRT_USBPHY2_ADDRESS;
+  static const uint32_t ehci = IMXRT_USB2_ADDRESS;
+  static const uint32_t pll = IMXRT_CCM_ANALOG_ADDRESS+0x20;
+
 #ifdef ARDUINO_TEENSY41
-private:
   void port_power(uint8_t port, bool set) override;
-#endif
 public:
   TeensyUSBHost2();
+#else
+public:
+  TeensyUSBHost2() = default;
+#endif
 };
 
 #include "drivers/drivers.h"

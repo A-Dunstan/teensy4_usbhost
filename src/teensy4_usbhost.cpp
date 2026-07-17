@@ -105,12 +105,6 @@ USBHostBase::TimerMsg::~TimerMsg() {
   delete next;
 }
 
-FLASHMEM USBHostBase::USBHostBase(ATOM_QUEUE &q, usb_ehci_base_t *usb) :
-USB_Host(usb),
-usbqueue(q) {
-  timerRelease = NULL;
-}
-
 FLASHMEM void USBHostBase::init_pll(REG32_QUAD_t *const PLL) {
   dprintf("Starting USB PLL... ");
   PLL->CLR = 0xC000;                              // bypass 24MHz
@@ -157,7 +151,10 @@ FLASHMEM void USBHostBase::phy_on(usb_phy_t *const PHY) {
 
 FLASHMEM void USBHostBase::thread_start(thread_param_t _p) {
   auto p = (USBHostBase*)_p;
+  usb_msg_t msgs[50];
+  atomQueueCreate(&p->usbqueue, msgs, sizeof(msgs[0]), sizeof(msgs) / sizeof(msgs[0]));
   p->thread();
+  atomQueueDelete(&p->usbqueue);
 }
 
 FLASHMEM void USBHostBase::begin(void) {
@@ -173,77 +170,72 @@ bool USBHostBase::isUSBThread(const USB_Device* p) {
   return false;
 }
 
-template <IRQ_NUMBER_t irq, uint32_t phy, uint32_t ehci, uint32_t pll>
-void TeensyUSB<irq,phy,ehci,pll>::nextIRQ(void) {
+template <class c>
+void TeensyUSB<c>::nextIRQ(void) {
   /* make sure any EHCI register writes are complete before clearing pending interrupts,
    * otherwise it may immediately re-pend
    */
   asm volatile("dmb");
-  NVIC_CLEAR_PENDING(irq);
-  NVIC_ENABLE_IRQ(irq);
+  NVIC_CLEAR_PENDING(c::irq);
+  NVIC_ENABLE_IRQ(c::irq);
 }
 
-template <IRQ_NUMBER_t irq, uint32_t phy, uint32_t ehci, uint32_t pll>
-void TeensyUSB<irq,phy,ehci,pll>::setHostMode(void) {
-  volatile uint32_t* HOST_EHCI = (volatile uint32_t*)ehci;
+template <class c>
+void TeensyUSB<c>::setHostMode(void) {
+  volatile uint32_t* HOST_EHCI = (volatile uint32_t*)c::ehci;
   HOST_EHCI[OFFSET_EHCI_USBMODE/4] = USB_USBMODE_CM(3); // 3 = host mode
   // setting SBUSCFG to anything other than 0 causes random issues...
   HOST_EHCI[OFFSET_EHCI_SBUSCFG/4] = 0;
 }
 
-template <IRQ_NUMBER_t irq, uint32_t phy, uint32_t ehci, uint32_t pll>
-void TeensyUSB<irq,phy,ehci,pll>::phySetHighSpeed(uint8_t port, bool on) {
-  usb_phy_t* HOST_PHY = (usb_phy_t*)phy;
+template <class c>
+void TeensyUSB<c>::phySetHighSpeed(uint8_t port, bool on) {
+  usb_phy_t* HOST_PHY = (usb_phy_t*)c::phy;
   if (on)
     HOST_PHY->CTRL.SET = USBPHY_CTRL_ENHOSTDISCONDETECT;
   else
     HOST_PHY->CTRL.CLR = USBPHY_CTRL_ENHOSTDISCONDETECT;
 }
 
-template <IRQ_NUMBER_t irq, uint32_t phy, uint32_t ehci, uint32_t pll>
-void TeensyUSB<irq,phy,ehci,pll>::usb_isr(void) {
-  usb_msg_t intmsg = { USB_MSG_INTERRUPT };
-  NVIC_DISABLE_IRQ(irq);
+template <class c>
+void TeensyUSB<c>::usb_isr(void) {
+  usb_msg_t msg = {USB_MSG_INTERRUPT};
+  NVIC_DISABLE_IRQ(c::irq);
   atomIntEnter();
-  if (atomQueuePut(&g_usbqueue, -1, &intmsg) != ATOM_OK)
-    digitalWriteFast(LED_BUILTIN, HIGH);
+  host->putMessage(msg);
   atomIntExit(0);
 }
 
-template <IRQ_NUMBER_t irq, uint32_t phy, uint32_t ehci, uint32_t pll>
-void TeensyUSB<irq,phy,ehci,pll>::thread(void) {
-  usb_msg_t msgs[50];
-  atomQueueCreate(&g_usbqueue, msgs, sizeof(msgs[0]), sizeof(msgs) / sizeof(msgs[0]));
-
-  attachInterruptVector(irq, usb_isr);
-  init_pll((struct REG32_QUAD_t*)pll);
+template <class c>
+void TeensyUSB<c>::thread(void) {
+  attachInterruptVector(c::irq, usb_isr);
+  init_pll((struct REG32_QUAD_t*)c::pll);
 
   // ungate clock
   CCM_CCGR6 |= CCM_CCGR6_USBOH3(CCM_CCGR_ON);
-  phy_on((struct usb_phy_t *)phy);
+  phy_on((struct usb_phy_t *)c::phy);
 
   atomTimerDelay(10 * SYSTEM_TICKS_PER_SEC / 1000);  // 10ms
 
-  NVIC_ENABLE_IRQ(irq);
+  NVIC_ENABLE_IRQ(c::irq);
   usb_process();
 
-  NVIC_DISABLE_IRQ(irq);
-  atomQueueDelete(&g_usbqueue);
+  NVIC_DISABLE_IRQ(c::irq);
+  // detach interrupt vector? Currently no method to do so...
 }
 
-FLASHMEM TeensyUSBHost1::TeensyUSBHost1() {}
+template <class c>
+TeensyUSB<c>::TeensyUSB() : USBHostBase((usb_ehci_base_t*)(c::ehci+OFFSET_EHCI_CAPLENGTH)) {host = this;}
 
-FLASHMEM TeensyUSBHost2::TeensyUSBHost2() {
 #ifdef ARDUINO_TEENSY41
+FLASHMEM TeensyUSBHost2::TeensyUSBHost2() {
   // enable USB protection IC GPIO (initially off)
   IOMUXC_SW_MUX_CTL_PAD_GPIO_EMC_40 = 5;
   IOMUXC_SW_PAD_CTL_PAD_GPIO_EMC_40 = 0x0008;  // slow speed, weak 150 ohm drive
   GPIO8_GDIR |= 1 << 26;
   GPIO8_DR_CLEAR = 1 << 26;
-#endif
 }
 
-#ifdef ARDUINO_TEENSY41
 void TeensyUSBHost2::port_power(uint8_t port, bool set) {
   if (port == 0) {
     if (set) {
@@ -256,6 +248,9 @@ void TeensyUSBHost2::port_power(uint8_t port, bool set) {
   }
 }
 #endif
+
+template class TeensyUSB<TeensyUSBHost1>;
+template class TeensyUSB<TeensyUSBHost2>;
 
 __attribute__((weak)) int usleep(useconds_t us) {
   const useconds_t us_per_tick = 1000000 / SYSTEM_TICKS_PER_SEC;
