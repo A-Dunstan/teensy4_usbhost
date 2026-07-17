@@ -27,7 +27,7 @@
 #define HUB_CLASS 9
 #define HUB_MAX_PROTOCOL 2
 
-class USB_Hub_Driver : public USB_Driver_FactoryGlue<USB_Hub_Driver>, private CCallback<usb_control_transfer>, private USB_Hub {
+class USB_Hub_Driver : public USB_Driver, private CCallback<usb_control_transfer>, private USB_Hub {
 private:
   USB_Device* const dev;
   const uint8_t status_ep;
@@ -54,18 +54,21 @@ private:
   void do_poll(void);
   void request_status(uint8_t port);
   bool putMessage(usb_msg_t &msg);
+  bool attach(const usb_device_descriptor*,const usb_configuration_descriptor*);
+
 public:
-  static bool offer_config(const usb_device_descriptor*,const usb_configuration_descriptor*);
-  static USB_Driver* attach_config(const usb_device_descriptor*,const usb_configuration_descriptor*,USB_Device*);
+  class Factory : public USB_Driver::Factory {
+    USB_Driver* offer(const usb_device_descriptor*,const usb_configuration_descriptor*,const USB_Device*) override;
+   public:
+    constexpr Factory() : USB_Driver::Factory(0) {}
+  };
 };
 
+static USB_Hub_Driver::Factory HubFactory;
+USB_Driver::Factory* USB_Driver::Factory::gList = &HubFactory;
+
 USB_Hub_Driver::USB_Hub_Driver(USB_Device *d, uint8_t status) :
-USB_Driver_FactoryGlue<USB_Hub_Driver>(d),
-USB_Hub(d->speed==2 ? d->address : d->hub_addr),dev(d),status_ep(status),hs_port(d->speed==2 ? 16 : d->port) {
-  dprintf("Attempting to get HUB descriptor...\n");
-  dev->ControlTransfer(USB_CTRLTYPE_DIR_DEVICE2HOST|USB_CTRLTYPE_TYPE_CLASS|USB_CTRLTYPE_REC_DEVICE, \
-    USB_REQ_GET_DESCRIPTOR, USB_DT_HUB<<8, 0, 255, NULL, this);
-}
+USB_Hub(d->speed==2 ? d->address : d->hub_addr),dev(d),status_ep(status),hs_port(d->speed==2 ? 16 : d->port) {}
 
 void USB_Hub_Driver::detach(void) {
   dprintf("USB_Hub_Driver<%p> detached\n", this);
@@ -84,61 +87,54 @@ void USB_Hub_Driver::detach(void) {
   deref();
 }
 
-bool USB_Hub_Driver::offer_config(const usb_device_descriptor *d, const usb_configuration_descriptor *c) {
-  if (d->bDeviceClass != HUB_CLASS)
-    return false;
-  if (d->bDeviceProtocol > HUB_MAX_PROTOCOL)
-    return false;
-  if (d->bDeviceSubClass == 0)
-    return true;
+USB_Driver* USB_Hub_Driver::Factory::offer(const usb_device_descriptor *dd, const usb_configuration_descriptor *c,const USB_Device *d) {
+  if (dd->bDeviceClass != HUB_CLASS)
+    return NULL;
+  if (dd->bDeviceProtocol > HUB_MAX_PROTOCOL)
+    return NULL;
+  if (dd->bDeviceSubClass > 1)
+    return NULL;
   // some hubs have bDeviceSubClass==1, check for one interface with bInterfaceClass==HUB_CLASSCODE(9)
   if (c->bNumInterfaces != 1)
-    return false;
-  // find first interface descriptor
-  const uint8_t *b = (const uint8_t*)(c+1);
-  while (b[1] != USB_DT_INTERFACE) b += b[0];
-
-  const usb_interface_descriptor *i = (const usb_interface_descriptor*)b;
-  if (i->bInterfaceClass!=HUB_CLASS || i->bInterfaceProtocol>HUB_MAX_PROTOCOL || i->bInterfaceSubClass>1)
-    return false;
-  if (i->bNumEndpoints < 1)
-    return false;
-  return true;
-}
-
-USB_Driver* USB_Hub_Driver::attach_config(const usb_device_descriptor *d, const usb_configuration_descriptor *c, USB_Device *dev) {
-  // find status endpoint
-  const uint8_t *b = (const uint8_t*)(c+1);
-  const uint8_t *end = b + c->wTotalLength-2;
-  for (int i=0; i < c->bNumInterfaces && b < end;) {
-    const uint8_t* bnext = b + b[0];
+    return NULL;
+  // check interface descriptors
+  auto b = (const uint8_t*)c;
+  for (b += b[0]; b[0]; b += b[0]) {
     if (b[1] == USB_DT_INTERFACE) {
-      auto iface = (const usb_interface_descriptor*)b;
-      if (iface->bAlternateSetting==0 &&
-          iface->bInterfaceClass==HUB_CLASS &&
-          iface->bInterfaceProtocol<=HUB_MAX_PROTOCOL &&
-          iface->bInterfaceSubClass<=1 &&
-          iface->bNumEndpoints > 0) {
-        // this looks like a hub interface, find an IN interrupt endpoint with packetsize==1
-        ++i;
-        b = bnext;
-        for (int j=0; j < iface->bNumEndpoints && b < end; b += b[0]) {
-          if (b[1] == USB_DT_ENDPOINT) {
-            auto ep = (const usb_endpoint_descriptor*)b;
-            if (ep->bEndpointAddress & USB_CTRLTYPE_DIR_DEVICE2HOST &&
-                (ep->bmAttributes & 3) == USB_ENDPOINT_INTERRUPT &&
-                ep->wMaxPacketSize==1) {
-              return new(std::nothrow) USB_Hub_Driver(dev, ep->bEndpointAddress);
-            }
-            ++j;
+      auto i = (const usb_interface_descriptor*)b;
+      if (i->bAlternateSetting != 0)
+        continue;
+      if (i->bInterfaceClass != HUB_CLASS)
+        continue;
+      if (i->bInterfaceProtocol > HUB_MAX_PROTOCOL)
+        continue;
+      if (i->bInterfaceSubClass > 1)
+        continue;
+      if (i->bNumEndpoints < 1)
+        continue;
+      for (int j=0; j < i->bNumEndpoints && b[0];) {
+        b += b[0];
+        if (b[1] == USB_DT_ENDPOINT) {
+          ++j;
+          auto ep = (const usb_endpoint_descriptor*)b;
+          if (ep->bEndpointAddress & USB_CTRLTYPE_DIR_DEVICE2HOST && \
+              (ep->bmAttributes & 3) == USB_ENDPOINT_INTERRUPT && \
+              ep->wMaxPacketSize==1) {
+            return new(std::nothrow) USB_Hub_Driver(const_cast<USB_Device*>(d), ep->bEndpointAddress);
           }
         }
-        continue;
       }
     }
-    b = bnext;
   }
   return NULL;
+}
+
+bool USB_Hub_Driver::attach(const usb_device_descriptor*, const usb_configuration_descriptor*) {
+  // get the hub descriptor
+  dprintf("Attempting to get HUB descriptor...\n");
+  dev->ControlTransfer(USB_CTRLTYPE_DIR_DEVICE2HOST|USB_CTRLTYPE_TYPE_CLASS|USB_CTRLTYPE_REC_DEVICE, \
+    USB_REQ_GET_DESCRIPTOR, USB_DT_HUB<<8, 0, 255, NULL, this);
+  return true;
 }
 
 void USB_Hub_Driver::int_callback(int result) {

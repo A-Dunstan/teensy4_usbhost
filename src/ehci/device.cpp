@@ -321,7 +321,8 @@ void USB_Device::deref(void) {
   if (refcount.fetch_sub(1) == 1) {
     // detach all drivers
     for (auto drv=drivers.begin(); drv != drivers.end(); drv++) {
-      (*drv)->disconnect();
+      (*drv)->device = NULL;
+      (*drv)->detach();
     }
     usb_msg_t msg = {
       .type = USB_MSG_ADDRESS_RELEASED,
@@ -418,14 +419,15 @@ void USB_Device::search_for_drivers(void) {
   // try each Configuration
   for (auto c=configs.begin(); c != configs.end(); c++) {
     const usb_configuration_descriptor *config = (*c).second->getConfiguration();
-    USB_Driver::Factory *f = USB_Driver::Factory::find_driver(&ddesc, config);
-    if (f != NULL) {
+    USB_Driver *d = USB_Driver::Factory::find_driver(&ddesc, config, this);
+    if (d != NULL) {
       activate_configuration((*c).first);
-      USB_Driver *d = f->attach(&ddesc, config, this);
-      if (d) {
+      d->device = this;
+      if (d->attach(&ddesc, config)) {
         drivers.push_back(d);
         return;
       }
+      d->detach();
     }
   }
   // else offer each individual interface from first configuration
@@ -436,15 +438,17 @@ void USB_Device::search_for_drivers(void) {
     const dev_interface *di = c->interface(i);
     if (di == NULL) break;
     const usb_interface_descriptor *iface = di->getInterface(l, 0);
-    USB_Driver::Factory *f = USB_Driver::Factory::find_driver(iface, l);
-    if (f != NULL) {
+    USB_Driver *d = USB_Driver::Factory::find_driver(iface, l, this);
+    if (d != NULL) {
       if (!activated) {
         activate_configuration((*(configs.begin())).first);
         activated = true;
       }
-      USB_Driver *d = f->attach(iface, l, this);
-      if (d) {
+      d->device = this;
+      if (d->attach(iface, l)) {
         drivers.push_back(d);
+      } else {
+        d->detach();
       }
     }
   }

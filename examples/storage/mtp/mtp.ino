@@ -1,4 +1,3 @@
-#define USE_MASS_STORAGE_FAT
 #include <teensy4_usbhost.h>
 
 // SET TEENSY USB TYPE TO "Serial + MTP Disk"
@@ -8,7 +7,7 @@
 /* WARNING: Currently MTP does not work correctly when different drives
  * are removed / inserted due to using the FIRST drive as storage for
  * an index file. In some cases this can lead to data corruption/destruction
- * when a new drive is inserted!
+ * when changing drives!
  */
 
 static DMAMEM TeensyUSBHost2 usb;
@@ -23,7 +22,6 @@ FLASHMEM void setup() {
   if (CrashReport) CrashReport.printTo(Serial);
 
   usb.begin();
-  USBVol.begin();
   MTP.begin();
   MTP.loop(); // get rid of thread-unsafe interval timer ASAP
   pinMode(LED_BUILTIN, OUTPUT);

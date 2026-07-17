@@ -2,7 +2,7 @@
  * This example requires at least one PSRAM chip.
  *
  * It is hardcoded to work with a specific USB webcam;
- * to test a different device requires changed the vendor ID
+ * to test a different device requires changing the vendor ID
  * and product ID in USB_Cam::offer(), and the parameters
  * set in USB_Cam::attach() to match the streaming endpoint
  * of the new device. You can find these parameters by examining
@@ -13,8 +13,8 @@
  */
 
 #include <time.h>
-#include <QNEthernet.h>
 #include <teensy4_usbhost.h>
+#include <QNEthernet.h>
 
 using namespace qindesign::network;
 
@@ -52,14 +52,12 @@ class USB_Cam : public USB_Driver, public USB_Driver::Factory {
   ATOM_QUEUE outputq;
   jpeg_frame outputq_msgs[5];
 
-  bool offer(const usb_device_descriptor *d, const usb_configuration_descriptor*) override {
-    if (getDevice() != NULL) return false; // already attached to a device
-    if (d->idVendor == 0x057E && d->idProduct == 0x030A) return true;
-    return false;
+  USB_Driver* offer(const usb_device_descriptor *d, const usb_configuration_descriptor*, const USB_Device*) override {
+    if (getDevice() != NULL) return NULL; // already attached to a device
+    if (d->idVendor == 0x057E && d->idProduct == 0x030A) return this;
+    return NULL;
   }
-  USB_Driver *attach(const usb_device_descriptor* d, const usb_configuration_descriptor*, USB_Device *dev) override {
-    setDevice(dev);
-
+  bool attach(const usb_device_descriptor* d, const usb_configuration_descriptor*) override {
     iface_streaming = 1;
     ep_in = 0x81;
     alt_setting = 6;
@@ -81,7 +79,7 @@ class USB_Cam : public USB_Driver, public USB_Driver::Factory {
       }
     });
 
-    return this;
+    return true;
   }
   void detach(void) {
     jpeg_frame f;

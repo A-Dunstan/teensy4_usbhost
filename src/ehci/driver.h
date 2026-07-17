@@ -22,36 +22,39 @@
 #include "types.h"
 
 class USB_Driver {
+  friend class USB_Device;
 private:
-  USB_Device* device;
+  USB_Device* device = NULL;
   virtual void detach(void) = 0;
+  virtual bool attach(const usb_device_descriptor*,const usb_configuration_descriptor*) { return false; }
+  virtual bool attach(const usb_interface_descriptor*,size_t) { return false; }
 public:
-  void disconnect(void) {device = NULL; detach();}
+  virtual ~USB_Driver() = default;
 
   class Factory {
   private:
     static class Factory* gList;
-    class Factory* next;
+    class Factory* next = NULL;
 
   protected:
-    Factory();
-    ~Factory();
-    virtual bool offer(const usb_device_descriptor*,const usb_configuration_descriptor*) {return false;}
-    virtual bool offer(const usb_interface_descriptor*,size_t) {return false;}
+    Factory() { add(); }
+    ~Factory() { remove(); }
+    // alternative constructor which doesn't auto-register
+    constexpr Factory(int) {};
+    void add(void);
+    void remove(void);
+
+    virtual USB_Driver* offer(const usb_device_descriptor*,const usb_configuration_descriptor*,const USB_Device*) {return NULL;}
+    virtual USB_Driver* offer(const usb_interface_descriptor*,size_t,const USB_Device*) {return NULL;}
   public:
-    static class USB_Driver::Factory* find_driver(const usb_device_descriptor*,const usb_configuration_descriptor*);
-    static class USB_Driver::Factory* find_driver(const usb_interface_descriptor*,size_t);
-    virtual class USB_Driver* attach(const usb_device_descriptor*,const usb_configuration_descriptor*,USB_Device*) {return NULL;}
-    virtual class USB_Driver* attach(const usb_interface_descriptor*,size_t,USB_Device*) {return NULL;}
+    static class USB_Driver* find_driver(const usb_device_descriptor*,const usb_configuration_descriptor*,const USB_Device*);
+    static class USB_Driver* find_driver(const usb_interface_descriptor*,size_t,const USB_Device*);
   };
 
-  virtual ~USB_Driver() = default;
 
 protected:
-  USB_Driver();
-  void setDevice(USB_Device *d) {device = d;}
   // return a const pointer so it can only be compared, not accessed
-  const USB_Device* getDevice(void) { return device; }
+  const USB_Device* getDevice(void) const { return device; }
   /* Bulk messages can be either scatter/gather or regular:
    * Scatter/gather messages contain an array of (possibly non-consecutive) buffers and lengths, one transfer per buffer is performed. Each buffer can be a maximum of
    * 16384 - 20480 bytes, depending on its starting offset within a 4096 byte page.
@@ -76,47 +79,5 @@ protected:
   int InterruptMessage(uint8_t bEndpoint, uint16_t wLength, void *data);
   int IsochronousMessage(uint8_t bEndpoint, isolength&, void *data);
 };
-
-// base class for a driver that can be instantiated multiple times as needed
-template <class Driver>
-class USB_Driver_FactoryGlue : public USB_Driver {
-  class Register : USB_Driver::Factory {
-    bool offer(const usb_device_descriptor *dd, const usb_configuration_descriptor *cd) {
-      return Driver::offer_config(dd,cd);
-    }
-    bool offer(const usb_interface_descriptor *id, size_t l) {
-      return Driver::offer_interface(id, l);
-    }
-    USB_Driver* attach(const usb_device_descriptor *dd, const usb_configuration_descriptor *cd, USB_Device *d) {
-      return Driver::attach_config(dd,cd,d);
-    }
-    USB_Driver* attach(const usb_interface_descriptor *id, size_t l, USB_Device *d) {
-      return Driver::attach_interface(id,l,d);
-    }
-  };
-  template<Register&> struct inst {};
-
-  // derived class should implement these as needed
-  static bool offer_config(const usb_device_descriptor*,const usb_configuration_descriptor*) {
-    return false;
-  }
-  static bool offer_interface(const usb_interface_descriptor*,size_t) {
-    return false;
-  }
-  static USB_Driver* attach_config(const usb_device_descriptor*,const usb_configuration_descriptor*,USB_Device*) {
-    return NULL;
-  }
-  static USB_Driver* attach_interface(const usb_interface_descriptor*,size_t,USB_Device*) {
-    return NULL;
-  }
-
-  static Register auto_reg;
-  static inst<auto_reg> reg_it;
-protected:
-  USB_Driver_FactoryGlue(USB_Device* p) {setDevice(p);}
-};
-
-template <class Driver> typename USB_Driver_FactoryGlue<Driver>::Register USB_Driver_FactoryGlue<Driver>::auto_reg;
-
 
 #endif // _USB_DRIVER_H

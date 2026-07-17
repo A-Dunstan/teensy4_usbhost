@@ -4,7 +4,6 @@
  */
 
 #include <vector>
-#define USE_MASS_STORAGE_FAT
 #include <teensy4_usbhost.h>
 #include <usbhost_utility.h>
 
@@ -295,8 +294,8 @@ void setup() {
 
   if (CrashReport) CrashReport.printTo(Serial);
 
-  usb.begin();
   USB_FAT_Volume::begin();
+  usb.begin();
   delay(1000);
   Serial.println("\n\nPress return to search for a USB drive");
 }

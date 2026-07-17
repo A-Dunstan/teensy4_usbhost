@@ -22,47 +22,45 @@
 #include "device.h"
 #include <cerrno>
 
-USB_Driver::Factory::Factory() {
+void USB_Driver::Factory::add(void) {
+  if (next != NULL) return;
+
   next = gList;
   gList = this;
 }
 
-USB_Driver::Factory::~Factory() {
+void USB_Driver::Factory::remove(void) {
+  if (next == NULL) return;
+
   USB_Driver::Factory** p = &gList;
   while (*p != NULL) {
     if (*p == this) {
       *p = next;
+      next = NULL;
       return;
     }
     p = &((*p)->next);
   }
 }
 
-USB_Driver::Factory* USB_Driver::Factory::find_driver(const usb_device_descriptor *dd, const usb_configuration_descriptor *cd) {
+USB_Driver* USB_Driver::Factory::find_driver(const usb_device_descriptor *dd, const usb_configuration_descriptor *cd, const USB_Device *d) {
   USB_Driver::Factory *f = gList;
   while (f) {
-    if (f->offer(dd, cd) == true)
-      return f;
+    auto driver = f->offer(dd, cd, d);
+    if (driver) return driver;
     f = f->next;
   }
   return NULL;
 }
 
-USB_Driver::Factory* USB_Driver::Factory::find_driver(const usb_interface_descriptor *id, size_t length) {
+USB_Driver* USB_Driver::Factory::find_driver(const usb_interface_descriptor *id, size_t length, const USB_Device *d) {
   USB_Driver::Factory *f = gList;
   while (f) {
-    if (f->offer(id, length) == true)
-      return f;
+    auto driver = f->offer(id, length, d);
+    if (driver) return driver;
     f = f->next;
   }
   return NULL;
-}
-
-USB_Driver::Factory* USB_Driver::Factory::gList;
-
-USB_Driver::USB_Driver() {
-  device = NULL;
-  dprintf("new USB_Driver %p\n", this);
 }
 
 int USB_Driver::ControlMessage(uint8_t bmRequestType, uint8_t bmRequest, uint16_t wValue, uint16_t wIndex, uint16_t wLength, void *data, const USBCallback* cb_func) {

@@ -16,7 +16,7 @@
   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#include "mouse.h"
+#include "../teensy4_usbhost.h"
 #include <cstring>
 
 bool USBMouse::begin(ATOM_QUEUE *q) {
@@ -55,38 +55,33 @@ const usb_endpoint_descriptor* USBMouse::find_endpoint(const usb_interface_descr
   return NULL;
 }
 
-bool USBMouse::offer(const usb_interface_descriptor* i, size_t len) {
-  if (attached) return false;
+USB_Driver* USBMouse::offer(const usb_interface_descriptor* i, size_t len, const USB_Device*) {
+  if (attached) return NULL;
   // want class==USB_CLASS_HID
-  if (i->bInterfaceClass != 3) return false;
+  if (i->bInterfaceClass != 3) return NULL;
   // want subclass==HID_SUBCLASS_BOOT
-  if (i->bInterfaceSubClass != 1) return false;
+  if (i->bInterfaceSubClass != 1) return NULL;
   // want protocol==HID_PROTOCOL_MOUSE
-  if (i->bInterfaceProtocol != 2) return false;
+  if (i->bInterfaceProtocol != 2) return NULL;
   // test for endpoint
-  if (find_endpoint(i, len) == NULL) return false;
-  return true;
-}
-
-USB_Driver* USBMouse::attach(const usb_interface_descriptor* i, size_t len, USB_Device* dev) {
-  if (!attached) {
-    const usb_endpoint_descriptor* ep = find_endpoint(i, len);
-    if (ep != NULL) {
-      report_len = ep->wMaxPacketSize;
-      ep_in = ep->bEndpointAddress;
-      interface = i->bInterfaceNumber;
-      setDevice(dev);
-      if (queue != NULL) {
-        attached = true;
-        startPolling();
-      } else {
-        attached = true;
-      }
-      dprintf("Mouse was attached\n");
-      return this;
-    }
+  auto ep = find_endpoint(i, len);
+  if (ep != NULL) {
+    report_len = ep->wMaxPacketSize;
+    ep_in = ep->bEndpointAddress;
+    interface = i->bInterfaceNumber;
+    return this;
   }
   return NULL;
+}
+
+bool USBMouse::attach(const usb_interface_descriptor*, size_t) {
+  dprintf("Mouse was attached\n");
+  if (queue != NULL) {
+    attached = true;
+    return startPolling() >= 0;
+  }
+  attached = true;
+  return true;
 }
 
 void USBMouse::detach(void) {

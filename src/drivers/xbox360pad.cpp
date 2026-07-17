@@ -16,7 +16,7 @@
   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#include "xbox360pad.h"
+#include "../teensy4_usbhost.h"
 
 #define FLAG_INPROGRESS       (1<<31)
 #define FLAG_SETLED           (1<<0)
@@ -130,42 +130,36 @@ FLASHMEM const usb_endpoint_descriptor* XBOX360Pad::find_endpoint(const void* p,
   return NULL;
 }
 
-FLASHMEM bool XBOX360Pad::offer(const usb_interface_descriptor* id, size_t length) {
-  if (getDevice() != NULL) return false;
-  if (id->bInterfaceClass != 255) return false;
-  if (id->bInterfaceSubClass != 93) return false;
-  if (id->bInterfaceProtocol != 1) return false;
+FLASHMEM USB_Driver* XBOX360Pad::offer(const usb_interface_descriptor* id, size_t length, const USB_Device*) {
+  if (getDevice() != NULL) return NULL;
+  if (id->bInterfaceClass != 255) return NULL;
+  if (id->bInterfaceSubClass != 93) return NULL;
+  if (id->bInterfaceProtocol != 1) return NULL;
+  ep_in = ep_out = 255;
   auto ep1 = find_endpoint(id, length);
-  if (find_endpoint(ep1, length) == NULL) return false;
-  return true;
-}
-
-FLASHMEM USB_Driver* XBOX360Pad::attach(const usb_interface_descriptor* id, size_t length, USB_Device *dev) {
-  if (getDevice() == NULL) {
-    ep_in = ep_out = 255;
-    const usb_endpoint_descriptor *ep1 = find_endpoint(id, length);
-    const usb_endpoint_descriptor *ep2 = find_endpoint(ep1, length);
-    if (ep1 != NULL) {
-      if (ep1->bEndpointAddress & 0x80) {
-        ep_in = ep1->bEndpointAddress;
-        if (ep2 && (ep2->bEndpointAddress & 0x80)==0)
-          ep_out = ep2->bEndpointAddress;
-      } else {
-        ep_out = ep1->bEndpointAddress;
-        if (ep2 && (ep2->bEndpointAddress & 0x80))
-          ep_in = ep2->bEndpointAddress;
-      }
-    }
-    if (ep_in != 255 && ep_out != 255) {
-      dprintf("Found XBOX360 compatible controller, ep_in = %02X, ep_out = %02X\n", ep_in, ep_out);
-      setDevice(dev);
-      flags = 0;
-      setLED(6);
-      InterruptMessage(ep_in, sizeof(rep_in), rep_in, &in_cb);
-      return this;
+  auto ep2 = find_endpoint(ep1, length);
+  if (ep1 != NULL) {
+    if (ep1->bEndpointAddress & 0x80) {
+      ep_in = ep1->bEndpointAddress;
+      if (ep2 && (ep2->bEndpointAddress & 0x80)==0)
+        ep_out = ep2->bEndpointAddress;
+    } else {
+      ep_out = ep1->bEndpointAddress;
+      if (ep2 && (ep2->bEndpointAddress & 0x80))
+        ep_in = ep2->bEndpointAddress;
     }
   }
+  if (ep_in != 255 && ep_out != 255) {
+    dprintf("Found XBOX360 compatible controller, ep_in = %02X, ep_out = %02X\n", ep_in, ep_out);
+    return this;
+  }
   return NULL;
+}
+
+FLASHMEM bool XBOX360Pad::attach(const usb_interface_descriptor* id, size_t length) {
+  flags = 0;
+  setLED(6);
+  return InterruptMessage(ep_in, sizeof(rep_in), rep_in, &in_cb) >= 0;
 }
 
 FLASHMEM void XBOX360Pad::detach(void) {

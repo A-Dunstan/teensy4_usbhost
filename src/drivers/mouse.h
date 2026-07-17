@@ -19,8 +19,6 @@
 #ifndef _USB_MOUSE_H
 #define _USB_MOUSE_H
 
-#include "../teensy4_usbhost.h"
-
 /* mouse driver sends this to event queue.
  * The boot protocol is very basic, it only defines the
  * first three bytes but some mice will return the scroll wheel
@@ -51,8 +49,8 @@ private:
   const usb_endpoint_descriptor* find_endpoint(const usb_interface_descriptor*,size_t);
 
   // Factory overrides
-  bool offer(const usb_interface_descriptor*, size_t) override;
-  USB_Driver* attach(const usb_interface_descriptor*,size_t,USB_Device*) override;
+  USB_Driver* offer(const usb_interface_descriptor*, size_t, const USB_Device*) override;
+  bool attach(const usb_interface_descriptor*,size_t) override;
   void detach(void) override;
 
 public:

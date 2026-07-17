@@ -16,7 +16,7 @@
   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#include "FL2000.h"
+#include "../teensy4_usbhost.h"
 #include "FL2000_regs.h"
 
 #include <usb_portab.h>
@@ -745,18 +745,22 @@ FLASHMEM int FL2000::process_interrupt(void) {
   return ret;
 }
 
-FLASHMEM bool FL2000::offer(const usb_device_descriptor* d, const usb_configuration_descriptor *cd) {
-  if (getDevice() != NULL) return false; // driver instance already attached to a device
-  if (d->idVendor != 0x1D5C || d->idProduct != 0x2000) return false;
-  return true;
+FLASHMEM USB_Driver* FL2000::offer(const usb_device_descriptor* d, const usb_configuration_descriptor *cd, const USB_Device* dev) {
+  if (getDevice() == NULL) {
+    if (d->idVendor == 0x1D5C && d->idProduct == 0x2000) {
+      // must be high speed
+      if (dev->getSpeed() == 2) {
+        return this;
+      }
+    }
+  }
+  return NULL;
 }
 
-FLASHMEM USB_Driver* FL2000::attach(const usb_device_descriptor *d, const usb_configuration_descriptor*, USB_Device *dev) {
-  setDevice(dev);
+FLASHMEM bool FL2000::attach(const usb_device_descriptor *d, const usb_configuration_descriptor*) {
   dbg_log("ATTACH");
   threadMsg msg = {CMD_ATTACH};
-  atomQueuePut(&workQueue, 10, &msg);
-  return this;
+  return atomQueuePut(&workQueue, 10, &msg) == ATOM_OK;
 }
 
 FLASHMEM void FL2000::detach(void) {

@@ -68,13 +68,13 @@ public:
   bool mediaPresent() override;
   const char * name() override; // this currently returns the "product" name of the underlying USB mass storage device
 
-  USB_FAT_Volume()  = default;
+  USB_FAT_Volume() { begin(); }
   ~USB_FAT_Volume() { unmount(); }
   // uncopyable
   USB_FAT_Volume(const USB_FAT_Volume&) = delete;
   USB_FAT_Volume& operator=(const USB_FAT_Volume&) = delete;
 
-  static bool begin() { FsDateTime::setCallback(TimeCB); return true; };
+  static bool begin() { FsDateTime::setCallback(TimeCB); USB_Storage::begin(); return true; };
 
   // mount a FAT partition on the given device and LUN, at the specified location
   bool mount(USB_Storage* usb, uint8_t LUN, uint32_t firstSector, uint32_t numSectors);

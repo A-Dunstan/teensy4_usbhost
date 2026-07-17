@@ -19,7 +19,6 @@
 #ifndef _USB_MASS_STORAGE_H
 #define _USB_MASS_STORAGE_H
 
-#include "../teensy4_usbhost.h"
 #include <atomic>
 #include <list>
 
@@ -40,7 +39,7 @@ typedef struct __attribute__((packed)) ms_csw {
   uint8_t bCSWStatus;
 } ms_csw;
 
-class USB_Storage : public USB_Driver_FactoryGlue<USB_Storage> {
+class USB_Storage : public USB_Driver {
 private:
   union __attribute__((aligned(32))) {
     uint8_t buf[32];
@@ -59,7 +58,7 @@ private:
   void deref(void);
 
   void detach(void);
-  USB_Storage(USB_Device*, uint8_t _interface, uint8_t _bulk_in, uint8_t _bulk_out);
+  USB_Storage(uint8_t _interface, uint8_t _bulk_in, uint8_t _bulk_out);
   ~USB_Storage();
   /* List of all attached USB mass storage devices. This may be accessed by different
    * threads so it needs to be guarded.
@@ -90,12 +89,21 @@ private:
   static mutex_cxx list_lock;
   mutex_cxx cmd_lock;
 
+  bool attach(const usb_interface_descriptor*,size_t) override;
+
+  class Factory : USB_Driver::Factory {
+    // class instance factory method, accessed by USB Host when a new device is inserted
+    USB_Driver* offer(const usb_interface_descriptor*,size_t,const USB_Device*) override;
+  public:
+    Factory() = default;
+  };
+
   // performs USB mass storage reset - this affects *all* LUNs on the device
   void reset();
+
 public:
-  // class instance factory methods, accessed by USB Host when a new device is inserted
-  static bool offer_interface(const usb_interface_descriptor*,size_t);
-  static USB_Driver* attach_interface(const usb_interface_descriptor*,size_t,USB_Device*);
+  // helper function to register USB_Driver for USB_Storage
+  static void begin(void);
 
   // return number of attached USB Storage devices
   static size_t get_device_count(void) {

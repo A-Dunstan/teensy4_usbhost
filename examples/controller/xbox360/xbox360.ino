@@ -1,4 +1,3 @@
-#define USE_XBOX360 1
 #include <teensy4_usbhost.h>
 
 static TeensyUSBHost2 usb;

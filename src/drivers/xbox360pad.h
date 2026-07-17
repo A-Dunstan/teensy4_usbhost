@@ -19,8 +19,6 @@
 #ifndef _USB_XBOX360PAD_H
 #define _USB_XBOX360PAD_H
 
-#include "../teensy4_usbhost.h"
-
 #define XBOX_BUTTON_UP           0x0001
 #define XBOX_BUTTON_DOWN         0x0002
 #define XBOX_BUTTON_LEFT         0x0004
@@ -69,8 +67,8 @@ class XBOX360Pad : public USB_Driver, public USB_Driver::Factory {
   void interrupt_out(int);
 
   // Factory overrides
-  bool offer(const usb_interface_descriptor*, size_t) override;
-  USB_Driver* attach(const usb_interface_descriptor*,size_t,USB_Device*) override;
+  USB_Driver* offer(const usb_interface_descriptor*, size_t, const USB_Device*) override;
+  bool attach(const usb_interface_descriptor*,size_t) override;
   void detach(void) override;
 
 public:

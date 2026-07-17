@@ -1,4 +1,3 @@
-#define USE_MASS_STORAGE
 #include <teensy4_usbhost.h>
 #include <cerrno>
 
@@ -8,6 +7,7 @@ void setup() {
   Serial.begin(0);
   while (!Serial);
 
+  USB_Storage::begin();
   usb.begin();
   delay(100);
   Serial.println("Press Enter to begin testing");
@@ -49,7 +49,7 @@ static void check_sense(USB_Storage *usbms, uint8_t lun) {
         Serial.printf("\tADDITIONAL SENSE CODE: %02Xh\n", sense.additional_sense_code);
         Serial.printf("\tADDITIONAL SENSE CODE QUALIFIER: %02Xh\n", sense.additional_sense_code_qualifier);
       }
-      else Serial.println("No addition sense information available");
+      else Serial.println("No additional sense information available");
     }
     else Serial.printf("Unexpected sense response code: %02X\n", sense.response_code);
   }

@@ -19,7 +19,6 @@
 #ifndef _USB_CH341_SERIAL_H
 #define _USB_CH341_SERIAL_H
 
-#include "../teensy4_usbhost.h"
 #include <HardwareSerial.h>
 #include <EventResponder.h>
 
@@ -119,8 +118,8 @@ public:
   size_t write(uint8_t);
 
   void detach(void);
-  bool offer(const usb_device_descriptor* d,const usb_configuration_descriptor*);
-  USB_Driver* attach(const usb_device_descriptor*,const usb_configuration_descriptor*, USB_Device* d);
+  USB_Driver* offer(const usb_device_descriptor*,const usb_configuration_descriptor*,const USB_Device*) override;
+  bool attach(const usb_device_descriptor*,const usb_configuration_descriptor*) override;
 };
 
 } // namespace ch341

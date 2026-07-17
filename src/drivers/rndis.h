@@ -19,8 +19,6 @@
 #ifndef _RNDIS_DRIVER_H
 #define _RNDIS_DRIVER_H
 
-#include "../teensy4_usbhost.h"
-
 typedef enum {
   DRIVER_MSG_ATTACH,
   DRIVER_MSG_DETACH,
@@ -98,8 +96,8 @@ class USB_RNDIS : public USB_Driver, public USB_Driver::Factory {
   static void thread_start(thread_param_t p) { ((USB_RNDIS*)p)->threadproc(); }
 
   static bool parse_config(const usb_configuration_descriptor* c, USB_RNDIS *p=NULL);
-  bool offer(const usb_device_descriptor *d, const usb_configuration_descriptor *c) override;
-  USB_Driver* attach(const usb_device_descriptor*,const usb_configuration_descriptor* c, USB_Device *dev) override;
+  USB_Driver* offer(const usb_device_descriptor*, const usb_configuration_descriptor*, const USB_Device*) override;
+  bool attach(const usb_device_descriptor*,const usb_configuration_descriptor*) override;
   void detach(void) override;
 
 public:

@@ -19,7 +19,7 @@
 #include <alloca.h>
 #include <cstring>
 #include <cstdio>
-#include "rndis.h"
+#include "../teensy4_usbhost.h"
 #include "rndis_protocol.h"
 #include "../usbhost_utility.h"
 
@@ -470,24 +470,20 @@ bool USB_RNDIS::parse_config(const usb_configuration_descriptor* c, USB_RNDIS *p
   return false;
 }
 
-bool USB_RNDIS::offer(const usb_device_descriptor *d, const usb_configuration_descriptor *c) {
-  if (getDevice() != NULL) return false;
-  return parse_config(c);
-}
-
-USB_Driver* USB_RNDIS::attach(const usb_device_descriptor*,const usb_configuration_descriptor* c, USB_Device *dev) {
+USB_Driver* USB_RNDIS::offer(const usb_device_descriptor*, const usb_configuration_descriptor *c, const USB_Device*) {
   if (getDevice() == NULL) {
     if (parse_config(c, this)) {
-      setDevice(dev);
-
-      driver_msg msg = {
-        .type = DRIVER_MSG_ATTACH
-      };
-      atomQueuePut(&queue, 1, &msg);
       return this;
     }
   }
   return NULL;
+}
+
+bool USB_RNDIS::attach(const usb_device_descriptor*,const usb_configuration_descriptor* c) {
+  driver_msg msg = {
+    .type = DRIVER_MSG_ATTACH
+  };
+  return atomQueuePut(&queue, 1, &msg) == ATOM_OK;
 }
 
 void USB_RNDIS::detach(void) {

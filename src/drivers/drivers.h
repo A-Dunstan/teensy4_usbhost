@@ -16,28 +16,15 @@
   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#ifdef USE_CH341
+#ifndef _TEENSY4_USBHOST_DRIVERS_H
+#define _TEENSY4_USBHOST_DRIVERS_H
+
 #include "ch341_serial.h"
-#endif
-
-#ifdef USE_MASS_STORAGE
-#include "mass_storage.h"
-#endif
-
-#ifdef USE_MASS_STORAGE_FAT
 #include "mass_storage_fat.h"
-#endif
-
-#ifdef USE_MOUSE
+#include "mass_storage.h"
 #include "mouse.h"
-#endif
-
-#ifdef USE_RNDIS
 #include "rndis.h"
-#endif
-
 #include "FL2000.h"
-
-#ifdef USE_XBOX360
 #include "xbox360pad.h"
-#endif
+
+#endif // _TEENSY4_USBHOST_DRIVERS_H

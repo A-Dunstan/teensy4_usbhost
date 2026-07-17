@@ -16,7 +16,7 @@
   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#include "ch341_serial.h"
+#include "../teensy4_usbhost.h"
 #include <cstdio>
 
 using namespace ch341;
@@ -378,14 +378,12 @@ void serial::detach(void) {
   dprintf("ch341::serial Detached\n");
 }
 
-bool serial::offer(const usb_device_descriptor* d,const usb_configuration_descriptor*) {
-  if (d->idVendor==0x4348 && d->idProduct==0x5523) return true;
-  if (d->idVendor==0x1A86 && d->idProduct==0x7523) return true; // CH340
-  return false;
-}
+USB_Driver* serial::offer(const usb_device_descriptor* d,const usb_configuration_descriptor* c,const USB_Device*) {
+  if ((d->idVendor!=0x4348 || d->idProduct!=0x5523) && \
+      (d->idVendor!=0x1A86 || d->idProduct!=0x7523))
+        return NULL;
 
-USB_Driver* serial::attach(const usb_device_descriptor*,const usb_configuration_descriptor* c, USB_Device* d) {
-  if (!attached) {
+  if (getDevice() == NULL) {
     int endpoints=0;
     ep_out = ep_in = ep_status = 0;
     const uint8_t* b = (const uint8_t*)(c+1);
@@ -415,28 +413,29 @@ USB_Driver* serial::attach(const usb_device_descriptor*,const usb_configuration_
         }
       }
     }
-    if (endpoints != 3) {
-      dprintf("ch341: failed to find 3 endpoints (%d)\n", endpoints);
-      return NULL;
+    if (endpoints == 3) {
+      return this;
     }
-
-    setDevice(d);
-
-    if (atomMutexGet(&rx_lock, 10) == ATOM_OK) {
-      out_status = 0;
-      atomMutexPut(&rx_lock);
-    }
-    started = false;
-    status = 0;
-    init(0, 0);
-    attached = true;
-    queue_read(data_in[0]);
-    queue_read(data_in[1]);
-
-    dprintf("ch341::serial Attached (%p)\n", this);
-    return this;
+    dprintf("ch341: failed to find 3 endpoints (%d)\n", endpoints);
   }
+
   return NULL;
+}
+
+bool serial::attach(const usb_device_descriptor*,const usb_configuration_descriptor* c) {
+  if (atomMutexGet(&rx_lock, 10) == ATOM_OK) {
+    out_status = 0;
+    atomMutexPut(&rx_lock);
+  }
+  started = false;
+  status = 0;
+  init(0, 0);
+  attached = true;
+  queue_read(data_in[0]);
+  queue_read(data_in[1]);
+
+  dprintf("ch341::serial Attached (%p)\n", this);
+  return true;
 }
 
 void serial::begin(uint32_t baud, uint16_t format, bool rts_cts) {

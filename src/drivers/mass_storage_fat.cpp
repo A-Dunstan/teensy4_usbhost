@@ -16,7 +16,7 @@
   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#include "mass_storage_fat.h"
+#include "../teensy4_usbhost.h"
 #include <sys/time.h>
 
 #define MAX_FILENAME_LEN 256

@@ -16,7 +16,7 @@
   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#include "mass_storage.h"
+#include "../teensy4_usbhost.h"
 
 #include <Arduino.h>  // millis() / delay()
 #include <cstring>
@@ -57,6 +57,10 @@
 std::list<USB_Storage*> USB_Storage::devices;
 USB_Storage::mutex_cxx USB_Storage::list_lock;
 
+void USB_Storage::begin(void) {
+  static Factory StorageFactory;
+}
+
 void USB_Storage::deref(void) {
   if (ref.fetch_sub(1, std::memory_order_release) == 1) {
     delete this;
@@ -81,41 +85,21 @@ USB_Storage* USB_Storage::open(void) {
   return NULL;
 }
 
-USB_Storage::USB_Storage(USB_Device *d, uint8_t iface, uint8_t ep_in, uint8_t ep_out) :
-USB_Driver_FactoryGlue<USB_Storage>(d), interface(iface), bulk_in(ep_in), bulk_out(ep_out) {
-  const uint8_t bmrtMaxLun = USB_CTRLTYPE_DIR_DEVICE2HOST|USB_CTRLTYPE_TYPE_CLASS|USB_CTRLTYPE_REC_INTERFACE;
-
+USB_Storage::USB_Storage(uint8_t iface, uint8_t ep_in, uint8_t ep_out) :
+interface(iface), bulk_in(ep_in), bulk_out(ep_out) {
   dprintf("Created new USB_Storage %p, interface %d, bulk_in %02X, bulk_out %02X\n", this, interface, bulk_in, bulk_out);
-  tag = millis()*0x01011111; // random-ish
-
-  xfer.buf[0] = 255;
-  ControlMessage(bmrtMaxLun, USBMS_REQ_GET_MAX_LUN, 0, interface, 1, xfer.buf, [this](int result) {
-    // get_lun is allowed to fail, but do not accept the device being unplugged
-    if (result != -ENODEV) {
-      if (result >= 0 && xfer.buf[0] <= 15)
-        lun_count = xfer.buf[0] + 1;
-      else
-        lun_count = 1;
-
-      auto lock = list_lock.autolock();
-      devices.push_back(this);
-    }
-  });
 }
 
 USB_Storage::~USB_Storage() {
   dprintf("USB_Storage<%p> was destroyed\n", this);
 }
 
-bool USB_Storage::offer_interface(const usb_interface_descriptor* id, size_t) {
-  if (id->bNumEndpoints < 2) return false;
-  if (id->bInterfaceClass != 8) return false;
-  if (id->bInterfaceSubClass != 6) return false;
-  if (id->bInterfaceProtocol != 80) return false;
-  return true;
-}
+USB_Driver* USB_Storage::Factory::offer(const usb_interface_descriptor* id, size_t s, const USB_Device*) {
+  if (id->bNumEndpoints < 2) return NULL;
+  if (id->bInterfaceClass != 8) return NULL;
+  if (id->bInterfaceSubClass != 6) return NULL;
+  if (id->bInterfaceProtocol != 80) return NULL;
 
-USB_Driver* USB_Storage::attach_interface(const usb_interface_descriptor* id, size_t s, USB_Device *dev) {
   uint8_t ep_out = 0, ep_in = 0;
   const uint8_t *p = (const uint8_t*)id;
   const uint8_t *desc_end = p + s;
@@ -131,12 +115,32 @@ USB_Driver* USB_Storage::attach_interface(const usb_interface_descriptor* id, si
           ep_out = ep->bEndpointAddress;
         }
         if (ep_in != 0 && ep_out != 0)
-          return new(std::nothrow) USB_Storage(dev, id->bInterfaceNumber, ep_in, ep_out);
+          return new(std::nothrow) USB_Storage(id->bInterfaceNumber, ep_in, ep_out);
       }
     }
     p += p[0];
   } while (p < desc_end);
   return NULL;
+}
+
+bool USB_Storage::attach(const usb_interface_descriptor* id, size_t s) {
+  const uint8_t bmrtMaxLun = USB_CTRLTYPE_DIR_DEVICE2HOST|USB_CTRLTYPE_TYPE_CLASS|USB_CTRLTYPE_REC_INTERFACE;
+
+  tag = millis()*0x01011111; // random-ish
+
+  xfer.buf[0] = 255;
+  return ControlMessage(bmrtMaxLun, USBMS_REQ_GET_MAX_LUN, 0, interface, 1, xfer.buf, [this](int result) {
+    // get_lun is allowed to fail, but do not accept the device being unplugged
+    if (result != -ENODEV) {
+      if (result >= 0 && xfer.buf[0] <= 15)
+        lun_count = xfer.buf[0] + 1;
+      else
+        lun_count = 1;
+
+      auto lock = list_lock.autolock();
+      devices.push_back(this);
+    }
+  }) >= 0;
 }
 
 USB_Storage* USB_Storage::open_device(size_t index) {

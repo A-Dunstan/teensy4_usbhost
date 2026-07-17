@@ -1,6 +1,5 @@
 #include <usb_mouse.h> // for having Teensy act as a mouse
 
-#define USE_MOUSE 1
 #include <teensy4_usbhost.h>
 
 static DMAMEM TeensyUSBHost2 usb;

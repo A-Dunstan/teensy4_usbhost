@@ -6,7 +6,6 @@
  * to initialize themselves and become ready.
  */
 
-#define USE_MASS_STORAGE_FAT
 #include <teensy4_usbhost.h>
 #include <usbhost_utility.h>
 

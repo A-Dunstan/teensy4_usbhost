@@ -19,7 +19,6 @@
 #ifndef _USB_FL2000_H
 #define _USB_FL2000_H
 
-#include "../teensy4_usbhost.h"
 #include <EventResponder.h>
 #include <DMAChannel.h>
 #include <vector>
@@ -164,8 +163,8 @@ private:
   int device_init(void);
 
   // Factory overrides
-  bool offer(const usb_device_descriptor* d, const usb_configuration_descriptor *cd) override;
-  USB_Driver* attach(const usb_device_descriptor *d, const usb_configuration_descriptor*, USB_Device *dev) override;
+  USB_Driver* offer(const usb_device_descriptor*, const usb_configuration_descriptor*, const USB_Device*) override;
+  bool attach(const usb_device_descriptor*, const usb_configuration_descriptor*) override;
   void detach(void) override;
 
   int forwardMsg(struct sync_request& req, threadMsg& msg);
