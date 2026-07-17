@@ -86,8 +86,6 @@ USB_Driver_FactoryGlue<USB_Storage>(d), interface(iface), bulk_in(ep_in), bulk_o
   const uint8_t bmrtMaxLun = USB_CTRLTYPE_DIR_DEVICE2HOST|USB_CTRLTYPE_TYPE_CLASS|USB_CTRLTYPE_REC_INTERFACE;
 
   dprintf("Created new USB_Storage %p, interface %d, bulk_in %02X, bulk_out %02X\n", this, interface, bulk_in, bulk_out);
-  ref = 1;
-  lun_count = 0;
   tag = millis()*0x01011111; // random-ish
 
   xfer.buf[0] = 255;

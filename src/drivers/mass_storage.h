@@ -51,10 +51,10 @@ private:
   const uint8_t bulk_in;
   const uint8_t bulk_out;
 
-  volatile uint8_t lun_count;
+  volatile uint8_t lun_count = 0;
   uint32_t tag;
 
-  std::atomic<unsigned int> ref;
+  std::atomic<unsigned int> ref = 1;
   void addref(void) { ref.fetch_add(1, std::memory_order_relaxed);}
   void deref(void);
 
