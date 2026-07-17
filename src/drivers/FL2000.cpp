@@ -54,7 +54,7 @@ static const struct mode_timing vid_modes[] PROGMEM = {
   // refresh rate is approximate, for lookup purposes only
   // WIDTH   HEIGHT   REFRESH  H_TOTAL  H_SYNC  H_BP  V_TOTAL  V_SYNC  V_BP  P    M    D   FLAGS
   {  256,    240,     60,      320,     38,     20,   525,     2,      33,   2,  127,  63, VIDMODE_FLAG_LINEDOUBLE},
-  {  256,    288,     50,      324,     34,     24,   597,     3,      17,   1,   35,  36, VIDMODE_FLAG_VSYNC_POS|VIDMODE_FLAG_LINEDOUBLE},
+  {  256,    288,     50,      324,     34,     24,   597,     3,      17,   2,   70,  36, VIDMODE_FLAG_VSYNC_POS|VIDMODE_FLAG_LINEDOUBLE},
   {  320,    200,     70,      400,     48,     24,   449,     2,      35,   1,   73,  58, VIDMODE_FLAG_VSYNC_POS|VIDMODE_FLAG_LINEDOUBLE},
   {  320,    240,     60,      400,     48,     24,   525,     2,      33,   1,   73,  58, VIDMODE_FLAG_LINEDOUBLE},
   {  320,    400,     70,      400,     48,     24,   449,     2,      35,   1,   73,  58, VIDMODE_FLAG_VSYNC_POS},
@@ -78,6 +78,7 @@ static const struct mode_timing vid_modes[] PROGMEM = {
   {  800,    600,     60,      1056,    128,    88,   628,     4,      23,   1,    8,   2, VIDMODE_FLAG_HSYNC_POS|VIDMODE_FLAG_VSYNC_POS},
   {  848,    480,     60,      1060,    128,    64,   525,     2,      33,   1,   45,  12, 0},
   { 1024,    600,     60,      1352,    164,   112,   628,     4,      23,   2,  123,  12, VIDMODE_FLAG_HSYNC_POS|VIDMODE_FLAG_VSYNC_POS},
+  { 1024,    768,     56,      1344,    136,   160,   806,     6,      29,   1,   91,  15, 0},
   { 1024,    768,     60,      1344,    136,   160,   806,     6,      29,   1,   13,   2, 0},
   { 1280,    720,     30,      1650,     40,   220,   750,     5,      20,   1,   26,   7, VIDMODE_FLAG_HSYNC_POS|VIDMODE_FLAG_VSYNC_POS},
   { 1280,   1024,     60,      1688,    112,   248,   1066,    3,      38,   1,   54,   5, VIDMODE_FLAG_HSYNC_POS|VIDMODE_FLAG_VSYNC_POS},
@@ -349,8 +350,7 @@ FLASHMEM int FL2000::i2c_transfer(uint8_t address, uint8_t offset, bool read) {
    * all accesses to the HDMI chip end up reading/writing 4 registers at a time,
    * and DDC/CI commands aren't possible at all due to being longer than 4 bytes.
    *
-   * Read commands seem to operate like this: START | ADDRESS+W | OFFSET&~3 | (RE)START | ADDRESS+R | byte0 | byte1 | byte2 | byte3 | STOP
-   * Write commands operate like this:        START | ADDRESS+W | OFFSET&~3 | byte0 | byte1 | byte2 | byte3 | STOP
+   * Reads are performed one byte at a time: START | ADDRESS+W | OFFSET&~3 | RESTART | ADDRESS+R | byte | STOP, START | ADDRESS+W | (OFFSET&~3)+1...
    */
 
   int ret = reg_write(REG_I2C_CONTROL, ctrl.val);
@@ -375,7 +375,7 @@ FLASHMEM int FL2000::i2c_transfer(uint8_t address, uint8_t offset, bool read) {
     return 0;
 
   errno = (ctrl.status) ? EIO : ETIMEDOUT;
-  dbg_log("i2c_transfer failed for address/offset %02X:%02X (%s), %s", address, offset, (read ? "read":"write"), strerror(errno));
+  dbg_log("i2c_transfer failed for address/offset %02X:%02X:%X (%s), %s", address, offset, ctrl.status, (read ? "read":"write"), strerror(errno));
   return -1;
 }
 
@@ -888,43 +888,43 @@ FLASHMEM int FL2000::setFormat(unsigned short width, unsigned short height, unsi
   if (best_mode)
     return setFormat(*best_mode, input_format, output_format);
 
-  errno = EINVAL;
+  errno = EFTYPE;
   return -1;
 }
 
 /* It is STRONGLY PREFERRED to use this library with DMAChannels that
  * support pre-emption. This requires the DMAChannel::begin() method to
- * have two bool parameters instead of one. These templates ensure this code
+ * have two bool arguments instead of one. These templates ensure this code
  * will still compile regardless of which DMAChannel implementation is found.
  */
 template <typename C>
-void DMABEGIN(C& dma, void (DMAChannel::*)(bool, bool)) {
-  dma.begin(true, true);
+void DMABEGIN(C dma, void (DMAChannel::*)(bool, bool)) {
+  dma->begin(true, true);
 }
 template <typename C>
-void DMABEGIN(C& dma, void (DMAChannel::*)(bool)) {
+void DMABEGIN(C dma, void (DMAChannel::*)(bool)) {
   fprintf(stderr, "Warning: DMA channel will not be pre-emptible, this may cause audio dropouts!\n");
-  dma.begin(true);
+  dma->begin(true);
 }
 
 class FL2000DMA {
   using DMARequest = FL2000::DMARequest;
 private:
   static DMARequest* queue;
-  static DMAChannel ch1;
-  static DMAChannel ch2;
+  static DMAChannel* ch1;
+  static DMAChannel* ch2;
 
   static void isr(void) {
     atomIntEnter();
-    ch1.clearInterrupt();
+    ch1->clearInterrupt();
     DMARequest *head, *next;
     do {
       head = LoadExclusivePtr(&queue);
       next = head->next;
     } while (StoreExclusivePtr(next, &queue));
     if (next) {
-      ch1 = next->line_count;
-      ch2 = next->line_copy;
+      *ch1 = next->line_count;
+      *ch2 = next->line_copy;
     }
     head->callback();
     atomIntExit(FALSE);
@@ -932,12 +932,17 @@ private:
 
   struct oneTimeInit {
     oneTimeInit() {
+      // hack: don't waste space registering these DMAChannels for destruction
+      static char dma1[sizeof(DMAChannel)] alignas(alignof(DMAChannel));
+      static char dma2[sizeof(DMAChannel)] alignas(alignof(DMAChannel));
       queue = NULL;
+      ch1 = new (dma1) DMAChannel(false);
+      ch2 = new (dma2) DMAChannel(false);
       DMABEGIN(ch1, &DMAChannel::begin);
       DMABEGIN(ch2, &DMAChannel::begin);
-      ch1.disable();
-      ch2.disable();
-      ch1.attachInterrupt(isr);
+      ch1->disable();
+      ch2->disable();
+      ch1->attachInterrupt(isr);
     }
   };
 
@@ -946,13 +951,13 @@ public:
     static oneTimeInit init;
 
     // end of line_copy minor loop self-triggers ch2
-    ch2.triggerAtTransfersOf(req.line_copy);
+    ch2->triggerAtTransfersOf(req.line_copy);
     // end of line_copy major loop triggers ch1
-    ch1.triggerAtCompletionOf(req.line_copy);
+    ch1->triggerAtCompletionOf(req.line_copy);
     // end of line_count minor loop triggers ch2
-    ch2.triggerAtTransfersOf(req.line_count);
+    ch2->triggerAtTransfersOf(req.line_count);
     // line_count writes to ch2 SADDR
-    req.line_count.TCD->DADDR = &ch2.TCD->SADDR;
+    req.line_count.TCD->DADDR = &(ch2->TCD->SADDR);
 
     DMARequest** tail;
     do {
@@ -968,15 +973,14 @@ public:
     } while (StoreExclusivePtr(&req, tail));
 
     if (tail == &queue) {
-      ch1 = req.line_count;
-      ch2 = req.line_copy;
+      *ch1 = req.line_count;
+      *ch2 = req.line_copy;
     }
   }
 };
 
 FL2000DMA::DMARequest* FL2000DMA::queue;
-DMAChannel FL2000DMA::ch1(false);
-DMAChannel FL2000DMA::ch2(false);
+DMAChannel *FL2000DMA::ch1, *FL2000DMA::ch2;
 
 void FL2000::convert_dma_init(slice_data *s) {
   uint8_t* dst = s->data;
@@ -1202,9 +1206,9 @@ class rle_compressor {
   uint32_t last_pixel = 0;
   uint32_t repeat = 0;
   size_t len = 0;
-  uint8_t* const buf;
+  uint8_t (&buf)[];
 public:
-  rle_compressor(uint8_t* _buf) : buf(_buf) {}
+  rle_compressor(uint8_t (&_buf)[]) : buf(_buf) {}
 
   void encode(uint8_t p) {
     p = (p >> 1) | 0x80;
@@ -1307,7 +1311,7 @@ void FL2000::convert_compress8(slice_data *slice, uint32_t height) {
   if (slice->last) {
     /* The last data byte of a frame can't be a run. This is very difficult to predict
      * due to the requirement of each compressed line being a multiple of 8 bytes in length,
-     * so just shorten the last source line by 8 pixels then encode them as uncompressed.
+     * so just shorten the last compressed source line by 8 pixels then encode them as uncompressed.
      */
     for (size_t j=0; j < width-8; j++) {
       compress.encode(src[offset++ & offset_mask]);
@@ -1315,16 +1319,24 @@ void FL2000::convert_compress8(slice_data *slice, uint32_t height) {
 
     compress.flush(dst);
     // copy final 8 pixels uncompressed
-    uint8_t e = src[offset++ & offset_mask];
-    uint8_t f = src[offset++ & offset_mask];
-    uint8_t g = src[offset++ & offset_mask];
-    uint8_t h = src[offset++ & offset_mask];
-    uint8_t a = src[offset++ & offset_mask];
-    uint8_t b = src[offset++ & offset_mask];
-    uint8_t c = src[offset++ & offset_mask];
-    uint8_t d = src[offset++ & offset_mask];
-    *(uint32_t*)dst = (d << 23) | (c << 15) | (b << 7) | (a >> 1) | 0x80808080; dst += 4;
-    *(uint32_t*)dst = (h << 23) | (g << 15) | (f << 7) | (e >> 1) | 0x80808080; dst += 4;
+    uint32_t a,b;
+    if (src == NULL) {
+      auto s = (const uint32_t*)offset;
+      b = s[0] >> 1;
+      a = s[1] >> 1;
+      offset += 8;
+    } else {
+      b = src[offset++ & offset_mask] >> 1;
+      b |= src[offset++ & offset_mask] << 7;
+      b |= src[offset++ & offset_mask] << 15;
+      b |= src[offset++ & offset_mask] << 23;
+      a = src[offset++ & offset_mask] >> 1;
+      a |= src[offset++ & offset_mask] << 7;
+      a |= src[offset++ & offset_mask] << 15;
+      a |= src[offset++ & offset_mask] << 23;
+    }
+    *(uint32_t*)dst = a | 0x80808080; dst += 4;
+    *(uint32_t*)dst = b | 0x80808080; dst += 4;
 
     if (doublestrike)
       slice->sg[height].wLength = dst - (uint8_t*)slice->sg[height].data;

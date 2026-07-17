@@ -162,8 +162,8 @@ typedef union {
     uint32_t status          :4;  // one bit for each byte transferred, 1=failed / 0=pass
     uint32_t monitor_detect  :1;
     uint32_t                 :1;
-    uint32_t edid_detect     :1;
-    uint32_t complete        :1;
+    uint32_t edid_detect     :1;  // this causes the device to attempt reading offset 0-7 from address 0x50 every ~500ms
+    uint32_t complete        :1;  // write this bit as zero to begin a transaction
   };
   uint32_t val;
 } reg_i2c_control;

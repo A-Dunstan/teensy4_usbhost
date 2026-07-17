@@ -205,6 +205,7 @@ public:
   int setFrame(const void *fb, size_t pitch, uint8_t fixb=0);
 
   // sets one or more palette entries, 32-bit value = 0x00RRGGBB
+  // INDEX 0 IS OUTPUT DURING BLANKING, LEAVE IT BLACK!!
   int setPalette(uint8_t index, size_t count, const uint32_t* colors);
 
   // fetches 128 bytes of EDID data from the given block
