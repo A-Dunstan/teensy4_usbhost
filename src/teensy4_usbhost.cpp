@@ -155,8 +155,13 @@ FLASHMEM void USBHostBase::phy_on(usb_phy_t *const PHY) {
   PHY->PWD.REG = 0;
 }
 
-void USBHostBase::begin(void) {
-  atomThreadCreate(&usb_thread, 64, thread_start, (uint32_t)this, usb_stack, sizeof(usb_stack), 0);
+FLASHMEM void USBHostBase::thread_start(thread_param_t _p) {
+  auto p = (USBHostBase*)_p;
+  p->thread();
+}
+
+FLASHMEM void USBHostBase::begin(void) {
+  atomThreadCreate(&usb_thread, 64, thread_start, this, usb_stack, sizeof(usb_stack), 0);
 }
 
 bool USBHostBase::isUSBThread(const USB_Device* p) {

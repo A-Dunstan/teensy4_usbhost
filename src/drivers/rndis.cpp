@@ -499,7 +499,7 @@ void USB_RNDIS::detach(void) {
 
 USB_RNDIS::USB_RNDIS(void) {
   atomQueueCreate(&queue, &q_msgs, sizeof(q_msgs[0]), sizeof(q_msgs)/sizeof(q_msgs[0]));
-  atomThreadCreate(&thread, 96, thread_start, (uint32_t)this, stack, sizeof(stack), 0);
+  atomThreadCreate(&thread, 96, thread_start, this, stack, sizeof(stack), 0);
   atomMutexCreate(&lock);
   atomCondCreate(&cmd_signal);
 }

@@ -94,7 +94,7 @@ private:
   ATOM_QUEUE workQueue;
   uint32_t workStack[640];
   void thread(void);
-  static void threadStart(uint32_t arg);
+  static void threadStart(thread_param_t arg);
 
   int dbg_log(const char* fmt, ...) const;
 

@@ -260,7 +260,7 @@ void FL2000::thread(void) {
 
 }
 
-FLASHMEM void FL2000::threadStart(uint32_t arg) {
+FLASHMEM void FL2000::threadStart(thread_param_t arg) {
   class FL2000* p = (class FL2000*)arg;
   // FIXME: thread cannot exit!
   while (1) {
@@ -766,7 +766,7 @@ FLASHMEM void FL2000::detach(void) {
 }
 
 FLASHMEM FL2000::FL2000() {
-  atomThreadCreate(&workThread, 80, threadStart, (uint32_t)this, workStack, sizeof(workStack), 0);
+  atomThreadCreate(&workThread, 80, threadStart, this, workStack, sizeof(workStack), 0);
 }
 
 FLASHMEM FL2000::~FL2000() {

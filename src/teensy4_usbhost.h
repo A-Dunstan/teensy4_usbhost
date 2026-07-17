@@ -61,9 +61,7 @@ private:
   ATOM_TCB usb_thread;
   uint32_t usb_stack[USB_STACK_SIZE];
   virtual void thread(void) = 0;
-  static void thread_start(uint32_t _p) {
-    ((class USBHostBase*)_p)->thread();
-  }
+  static void thread_start(thread_param_t _p);
 
 protected:
   USBHostBase(ATOM_QUEUE&, usb_ehci_base_t*);

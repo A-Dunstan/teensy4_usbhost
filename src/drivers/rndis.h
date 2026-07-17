@@ -95,7 +95,7 @@ class USB_RNDIS : public USB_Driver, public USB_Driver::Factory {
   size_t data_unpack(void*);
 
   void threadproc(void);
-  static void thread_start(uint32_t p) { ((USB_RNDIS*)p)->threadproc(); }
+  static void thread_start(thread_param_t p) { ((USB_RNDIS*)p)->threadproc(); }
 
   static bool parse_config(const usb_configuration_descriptor* c, USB_RNDIS *p=NULL);
   bool offer(const usb_device_descriptor *d, const usb_configuration_descriptor *c) override;
