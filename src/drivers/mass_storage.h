@@ -78,12 +78,11 @@ private:
 
     class auto_lock {
     private:
-      const uint8_t locked;
       ATOM_MUTEX *lck;
     public:
-      auto_lock(ATOM_MUTEX *g) : locked(atomMutexGet(g, SYSTEM_TICKS_PER_SEC*5)), lck(g) {}
-      ~auto_lock() { if (locked == ATOM_OK) atomMutexPut(lck); }
-      operator bool() { return locked == ATOM_OK; }
+      auto_lock(ATOM_MUTEX *g) : lck(atomMutexGet(g, SYSTEM_TICKS_PER_SEC*5)==ATOM_OK ? g:NULL) {}
+      ~auto_lock() { if (lck != NULL) atomMutexPut(lck); }
+      operator bool() { return lck != NULL; }
     };
     class auto_lock autolock(void) { return auto_lock(&mtx); }
   };
