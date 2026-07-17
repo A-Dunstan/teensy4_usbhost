@@ -47,7 +47,7 @@ private:
 
   const USBCallback poll_cb = [=](int r) { poll(r); };
   void poll(int result);
-  void startPolling();
+  int startPolling();
   const usb_endpoint_descriptor* find_endpoint(const usb_interface_descriptor*,size_t);
 
   // Factory overrides

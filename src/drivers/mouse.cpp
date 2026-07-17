@@ -107,9 +107,9 @@ void USBMouse::poll(int result) {
   }
 }
 
-void USBMouse::startPolling() {
+int USBMouse::startPolling() {
   // set the boot protocol (instead of HID reports)
-  ControlMessage(USB_REQTYPE_INTERFACE_SET|USB_CTRLTYPE_TYPE_CLASS, USB_REQ_SETPROTOCOL, 0, interface, 0, NULL, [=](int r) {
+  return ControlMessage(USB_REQTYPE_INTERFACE_SET|USB_CTRLTYPE_TYPE_CLASS, USB_REQ_SETPROTOCOL, 0, interface, 0, NULL, [=](int r) {
     if (r != -ENODEV) {
       // boot protocol was (hopefully) set, starting polling
       InterruptMessage(ep_in, report_len, report, &poll_cb);
