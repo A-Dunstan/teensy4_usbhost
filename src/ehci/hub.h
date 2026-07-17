@@ -28,7 +28,7 @@ private:
     uint32_t state;
     class USB_Device *device;
     uint32_t timeout_start;
-  } port[8];
+  } port[8] = {0};
 
   virtual void port_power(uint8_t port, bool set) = 0;
   virtual void port_reset(uint8_t port, bool set) = 0;
@@ -41,7 +41,7 @@ private:
 
 protected:
   uint8_t const hub_addr;
-  USB_Hub(uint8_t addr);
+  USB_Hub(uint8_t addr) : hub_addr(addr) {}
 };
 
 #endif // _USB_HUB_H
