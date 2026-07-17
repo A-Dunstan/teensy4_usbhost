@@ -47,7 +47,7 @@ public:
   void flush(void);
 };
 
-class serial : public USB_Driver, public USB_Driver::Factory, public HardwareSerial, public EventResponder {
+class serial : public USB_Driver, public USB_Driver::Factory, public HardwareSerial {
 private:
   uint8_t status_in[8] __attribute__((aligned(32)));
   uint8_t data_in[2][64] __attribute__((aligned(32)));
@@ -89,6 +89,7 @@ private:
   ATOM_MUTEX tx_lock;
   ATOM_COND tx_signal;
 
+  EventResponder event_timer;
   static void send_timer_expired(EventResponder&);
   MillisTimer sendTimer;
 
@@ -98,7 +99,6 @@ private:
   ATOM_MUTEX rx_lock;
 
   circ_buf<512> read_buf;
-
 public:
   serial();
   ~serial();

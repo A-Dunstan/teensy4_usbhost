@@ -325,11 +325,13 @@ void serial::init(int result, unsigned int stage) {
 }
 
 void serial::send_timer_expired(EventResponder& e) {
-  (static_cast<serial*>(&e))->flush();
+  auto p = (serial*)e.getContext();
+  p->flush();
 }
 
 serial::serial() {
-  EventResponder::attach(send_timer_expired);
+  event_timer.setContext(this);
+  event_timer.attach(send_timer_expired);
   atomMutexCreate(&tx_lock);
   atomMutexCreate(&rx_lock);
   atomCondCreate(&tx_signal);
@@ -356,7 +358,7 @@ serial::~serial() {
     attached = false;
   }
 
-  EventResponder::detach();
+  event_timer.detach();
 
   atomCondDelete(&tx_signal);
   atomMutexDelete(&tx_lock);
@@ -536,7 +538,7 @@ size_t serial::write(uint8_t c) {
         ret = 1;
         // maybe start the timer to send later
         if (tx_length < tx_max)
-          sendTimer.begin(1, *this);
+          sendTimer.begin(1, event_timer);
         // else send now
         else
           flush();
