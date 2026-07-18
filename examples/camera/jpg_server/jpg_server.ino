@@ -61,14 +61,11 @@ class USB_Cam : public USB_Driver, public USB_Driver::Factory {
     iface_streaming = 1;
     ep_in = 0x81;
     alt_setting = 6;
-    /* manufacturer string in the device descriptor for this webcam is different between full/high speed,
-     * makes it easy to differentiate without actually parsing the endpoint descriptor
-     */
-    wMaxPacketSize = (d->iManufacturer == 48 ? 3 : 1) * 0x3FC;
+    wMaxPacketSize = (getDevice()->getSpeed() == 2 ? 3 : 1) * 0x3FC;
     sample_buf = (uint8_t*)aligned_alloc(32, wMaxPacketSize*8*QUEUE_LENGTH);
 
     // activate alt streaming interface
-    ControlMessage(USB_REQTYPE_INTERFACE_SET, USB_REQ_SET_INTERFACE, alt_setting, iface_streaming, 0, NULL, [=](int r) {
+    ControlMessage(USB_REQTYPE_INTERFACE_SET, USB_REQ_SET_INTERFACE, alt_setting, iface_streaming, [=](int r) {
       if (r >= 0) {
         for (int i=0; i < QUEUE_LENGTH; i++) {
           iso_transfer t = {sample_buf+i*8*wMaxPacketSize, &iso_lengths[i]};
