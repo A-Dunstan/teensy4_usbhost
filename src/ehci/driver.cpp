@@ -224,9 +224,8 @@ static int MessageWrapper(USBCallback& user_cb, const req_fn& req) {
       delete cb;
     };
     ret = req(cb);
-    if (ret >= 0)
-      return ret;
-    delete cb;
+    if (ret < 0)
+      delete cb;
   }
   return ret;
 }
@@ -236,7 +235,9 @@ int USB_Driver::BulkMessage(uint8_t bEndpoint, uint32_t dLength, const void *dat
     errno = EFAULT;
     return -1;
   }
-  return BulkMessage(bEndpoint, dLength, const_cast<void*>(data), cb_func);
+  return MessageWrapper(cb_func, [&](const USBCallback* cb)->int {
+    return BulkMessage(bEndpoint, dLength, const_cast<void*>(data), cb);
+  });
 }
 
 int USB_Driver::BulkMessage(uint8_t bEndpoint, uint32_t dLength, void *data, USBCallback cb_func) {
@@ -250,7 +251,9 @@ int USB_Driver::InterruptMessage(uint8_t bEndpoint, uint16_t wLength, const void
     errno = EFAULT;
     return -1;
   }
-  return InterruptMessage(bEndpoint, wLength, const_cast<void*>(data), cb_func);
+  return MessageWrapper(cb_func, [&](const USBCallback* cb)->int {
+    return InterruptMessage(bEndpoint, wLength, const_cast<void*>(data), cb);
+  });
 }
 
 int USB_Driver::InterruptMessage(uint8_t bEndpoint, uint16_t wLength, void *data, USBCallback cb_func) {
@@ -264,7 +267,9 @@ int USB_Driver::IsochronousMessage(uint8_t bEndpoint, isolength& Lengths, const 
     errno = EFAULT;
     return -1;
   }
-  return IsochronousMessage(bEndpoint, Lengths, const_cast<void*>(data), cb_func);
+  return MessageWrapper(cb_func, [&](const USBCallback* cb)->int {
+    return IsochronousMessage(bEndpoint, Lengths, const_cast<void*>(data), cb);
+  });
 }
 
 int USB_Driver::IsochronousMessage(uint8_t bEndpoint, isolength& Lengths, void *data, USBCallback cb_func) {
