@@ -259,7 +259,11 @@ void USB_Device::callback(const usb_control_transfer *t, int result) {
                   }
                 }
               } else if (t->getwIndex() == 0x0409) {
+// if there was a non-deprecated option for this I would use it...
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
                 std::wstring_convert<std::codecvt_utf8<char16_t>, char16_t> converter;
+#pragma GCC diagnostic pop
                 strings[index] = converter.to_bytes(std::u16string(s->bString,len));
                 dprintf("Device<%p> string index %d: %s\n", this, index, strings.at(index).c_str());
               }
