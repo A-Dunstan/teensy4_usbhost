@@ -273,11 +273,11 @@ static int sync_message(const USB_Device* dev, const req_fn& req) {
     if (atomSemCreate(&sem, 0) == ATOM_OK) {
       int xfer_r;
       // order of operations is tricky here, follow the numbers
-      USBCallback fn = [&](int r) {
+      USBCallback fn([&](int r) {
         // USB Host thread performs this action when transfer is complete
         xfer_r = r;         // 4: actual result of the transfer is stored
         atomSemPut(&sem);   // 5: unblock main thread
-      };
+      });
       result = req(&fn);     // 1: queue async Control/Bulk/InterruptMessage request
       if (result >= 0) {    // 2: result of attempt to queue the transfer is checked
         if (atomSemGet(&sem, 0) == ATOM_OK) {

@@ -324,3 +324,16 @@ __attribute__((weak)) int USB_Driver::IsochronousMessage(uint8_t,isolength&,void
   errno = ENOSYS;
   return -1;
 }
+
+const usb_endpoint_descriptor* get_interface_endpoint(const usb_interface_descriptor* desc, uint8_t index) {
+  auto src = (const uint8_t*)desc;
+
+  for (uint8_t i=0; i < desc->bNumEndpoints;) {
+    if (src[1] == USB_DT_ENDPOINT) {
+      if (i++ == index) return (const usb_endpoint_descriptor*)src;
+    }
+    src += src[0];
+  }
+
+  return NULL;
+}
