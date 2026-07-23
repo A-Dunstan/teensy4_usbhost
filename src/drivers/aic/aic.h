@@ -1,5 +1,5 @@
 /*
-  Copyright (C) 2024 Andrew Dunstan
+  Copyright (C) 2026 Andrew Dunstan
   This file is part of teensy4_usbhost.
 
   teensy4_usbhost is free software: you can redistribute it and/or modify
@@ -16,16 +16,16 @@
   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#ifndef _TEENSY4_USBHOST_DRIVERS_H
-#define _TEENSY4_USBHOST_DRIVERS_H
+#ifndef _USB_AIC_H
+#define _USB_AIC_H
 
-#include "ch341_serial.h"
-#include "mass_storage_fat.h"
-#include "mass_storage.h"
-#include "mouse.h"
-#include "rndis.h"
-#include "FL2000.h"
-#include "xbox360pad.h"
-#include "aic/aic.h"
+class AIC8800D80 : USB_Driver::Factory {
+  // this class just sends a SCSI mass storage eject request to kick the device out of mass storage mode
+  static USB_Driver* create_ejector();
+  // performs initial bluetooth/wifi firmware upload
+  static USB_Driver* create_fwuploader();
 
-#endif // _TEENSY4_USBHOST_DRIVERS_H
+  USB_Driver* offer(const usb_device_descriptor*, const usb_configuration_descriptor*, const USB_Device*) override;
+};
+
+#endif // _USB_AIC_H

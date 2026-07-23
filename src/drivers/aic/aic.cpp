@@ -1,5 +1,5 @@
 /*
-  Copyright (C) 2024 Andrew Dunstan
+  Copyright (C) 2026 Andrew Dunstan
   This file is part of teensy4_usbhost.
 
   teensy4_usbhost is free software: you can redistribute it and/or modify
@@ -16,16 +16,17 @@
   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#ifndef _TEENSY4_USBHOST_DRIVERS_H
-#define _TEENSY4_USBHOST_DRIVERS_H
+#include "../../teensy4_usbhost.h"
 
-#include "ch341_serial.h"
-#include "mass_storage_fat.h"
-#include "mass_storage.h"
-#include "mouse.h"
-#include "rndis.h"
-#include "FL2000.h"
-#include "xbox360pad.h"
-#include "aic/aic.h"
+USB_Driver* AIC8800D80::offer(const usb_device_descriptor* d, const usb_configuration_descriptor*, const USB_Device*) {
+  // mass storage configuration "Aic MSC"
+  if (d->idVendor==0xA69C && d->idProduct==0x5721) return create_ejector();
 
-#endif // _TEENSY4_USBHOST_DRIVERS_H
+  // ready-for-firmware configuration "AIC Wlan"
+  if (d->idVendor==0xA69C && d->idProduct==0x8D80) return create_fwuploader();
+
+  // Wifi/Bluetooth configuration "AIC 8800D80"
+  // if (d->idVendor==0x368B && d->idProduct==0x8D81) claim the wifi interface only because bluetooth uses standard HCI
+
+  return NULL;
+}
