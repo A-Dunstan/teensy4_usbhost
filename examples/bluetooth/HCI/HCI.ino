@@ -70,7 +70,7 @@ class BT_HCI_test : USB_Driver, USB_Driver::Factory {
           }
         }
       }
-      
+
       // receive next event
       InterruptMessage(event_in, sizeof(buf), buf, [=](int r) {event_receive(r);});
     }

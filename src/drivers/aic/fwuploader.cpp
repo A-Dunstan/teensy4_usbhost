@@ -250,6 +250,7 @@ int fwuploader::ipc_recv(void) {
   if (r < 16) return -1;
   if (r < rxmsg.len+4) return -1;
   if (rxmsg.cmd != USB_TYPE_CFG_CMD_RSP) return -1;
+  if (rxmsg.pattern != RX_MSG_VALID_PATTERN) return -1;
   if (rxmsg.lmac.dest_id+1 != tid) return -1;
   if (rxmsg.lmac.src_id != TASK_DEBUG) return -1;
 
