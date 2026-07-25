@@ -26,6 +26,9 @@
 #include "fw_patch_8800d80_u02.h"
 #include "fw_patch_8800d80_u02_ext.h"
 #include "fmacfw_8800d80_u02.h"
+#include "fmacfw_8800d80_h_u02.h"
+
+#define RX_MSG_VALID_PATTERN 0xADDEDE2A
 
 #define FW_RAM_ADID_BASE_ADDR         0x002017E0
 #define FW_RAM_PATCH_BASE_ADDR        0x0020B2B0
@@ -235,7 +238,7 @@ public:
 
 int fwuploader::ipc_send(void) {
   txmsg.len = txmsg.lmac.len+12;
-  txmsg.cmd = USB_TYPE_CFG;
+  txmsg.cmd = 0x11;
   txmsg.empty = 0;
   txmsg.lmac.dest_id = TASK_DEBUG;
   txmsg.lmac.src_id = tid++;
@@ -579,12 +582,11 @@ int fwuploader::download_fw(void) {
       return -1;
     }
 
-//    if (IS_CHIP_ID_H()) {
-//      if (bin_fw_upload(RAM_FMAC_FW_ADDR_U02, fmacfw_h_u02, sizeof(fmacfw_h_u02))) {
-//        return -1;
-//      }
-//    } else
-    {
+    if (IS_CHIP_ID_H()) {
+      if (bin_fw_upload(RAM_FMAC_FW_ADDR_U02, fmacfw_h_u02, sizeof(fmacfw_h_u02))) {
+        return -1;
+      }
+    } else {
       if (bin_fw_upload(RAM_FMAC_FW_ADDR_U02, fmacfw_u02, sizeof(fmacfw_u02))) {
         return -1;
       }

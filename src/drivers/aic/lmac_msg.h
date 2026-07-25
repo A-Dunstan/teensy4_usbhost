@@ -311,8 +311,6 @@ struct tx_msg {
   };
 };
 
-#define RX_MSG_VALID_PATTERN 0xADDEDE2A
-
 struct rx_msg {
   uint16_t len;
   uint16_t cmd;
