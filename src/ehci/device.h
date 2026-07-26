@@ -41,14 +41,13 @@ private:
   std::atomic_uint refcount;
 
   struct Endpoint_Elem {
-    USB_Endpoint *ep;
-    int type;
+    USB_Endpoint *ep = NULL;
+    int type = -1;
   };
   struct Endpoint_Array {
     // 1-15=OUT,16-30=IN
     Endpoint_Elem eps[31];
     Endpoint_Elem& operator[] (size_t ep_addr);
-    Endpoint_Array();
   } Endpoints;
 
   usb_device_descriptor ddesc;
@@ -93,7 +92,6 @@ public:
   uint16_t getVID(void) const { return ddesc.idVendor; }
   uint16_t getPID(void) const { return ddesc.idProduct; }
 };
-
 
 uint8_t validate_descriptor(const uint8_t* &desc, const uint8_t* const end);
 static inline uint8_t validate_descriptor(const uint8_t* desc, int length) {

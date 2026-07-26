@@ -142,14 +142,6 @@ USB_Device::Endpoint_Elem& USB_Device::Endpoint_Array::operator[] (size_t ep_add
   return eps[index];
 }
 
-USB_Device::Endpoint_Array::Endpoint_Array() {
-  for (size_t i=0; i < sizeof(eps)/sizeof(eps[0]); i++) {
-    eps[i].ep = NULL;
-    eps[i].type = -1;
-  }
-};
-
-
 void USB_Device::callback(const usb_control_transfer *t, int result) {
   dprintf("Device<%p> control callback %p result %d\n", this, t, result);
   uint16_t rt_rq = MK_BE16(t->getbmRequestType(), t->getbmRequest());
