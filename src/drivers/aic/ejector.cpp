@@ -53,6 +53,7 @@ bool ejector::attach(const usb_device_descriptor*, const usb_configuration_descr
   receive(0);
 
   dprintf("Sending eject command to AIC mass storage\n");
+  atomTimerDelay(1); // avoid race condition of SET_CONFIGURATION request being sent after eject request
   int r = BulkMessage(bulk_out, sizeof(eject), &eject, [=](int r){ dprintf("eject send result: %d(%s)\n", r, r>=31 ? "ok":"bad"); });
   if (r < 0) {
     dprintf("Failed to queue eject command: %d\n", r);
