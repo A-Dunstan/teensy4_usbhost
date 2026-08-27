@@ -41,7 +41,7 @@ private:
   uint8_t ep_in;
   uint8_t interface;
   volatile bool attached = false;
-  ATOM_QUEUE *queue = NULL;
+  AtomQueue<mouse_event>* queue = NULL;
 
   const USBCallback poll_cb = [=](int r) { poll(r); };
   void poll(int result);
@@ -57,7 +57,7 @@ public:
   USBMouse() = default;
 
   operator bool() const { return attached==true; }
-  bool begin(ATOM_QUEUE *q);
+  bool begin(AtomQueue<mouse_event>* queue);
 };
 
 #endif // _USB_MOUSE_H

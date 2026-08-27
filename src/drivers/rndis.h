@@ -37,7 +37,7 @@ typedef struct {
       size_t *len;
     };
   };
-  ATOM_SEM *signal;
+  AtomSem* signal;
 } driver_msg;
 
 struct rndis_msg_indicate_status;
@@ -47,11 +47,10 @@ class USB_RNDIS : public USB_Driver, public USB_Driver::Factory {
   uint8_t data_buf[0x4000] __attribute__((aligned(32)));
   uint32_t status[8] __attribute__((aligned(32)));
   uint32_t stack[0x400] __attribute__((aligned(8)));
-  driver_msg q_msgs[8];
-  ATOM_QUEUE queue;
   ATOM_TCB thread;
-  ATOM_MUTEX lock;
-  ATOM_COND cmd_signal;
+  TAtomQueue<driver_msg, 8> queue;
+  AtomMutex mutex;
+  AtomCond cmd_signal;
 
   uint16_t data_in_maxpacket;
   uint16_t data_out_maxpacket;

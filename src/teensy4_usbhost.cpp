@@ -44,7 +44,7 @@ uint32_t USBHostBase::getMillis(void) {
 }
 
 bool USBHostBase::getMessage(usb_msg_t &msg) {
-  uint8_t s = atomQueueGet(&usbqueue, 0, &msg);
+  uint8_t s = usbqueue.Get(0, msg);
   if (s != ATOM_OK)
     digitalWriteFast(LED_BUILTIN, HIGH);
   // release used timers now
@@ -54,7 +54,7 @@ bool USBHostBase::getMessage(usb_msg_t &msg) {
 }
 
 bool USBHostBase::putMessage(usb_msg_t &msg) {
-  if (atomQueuePut(&usbqueue, -1, &msg) != ATOM_OK) {
+  if (usbqueue.Put(-1, msg) != ATOM_OK) {
     digitalWriteFast(LED_BUILTIN, HIGH);
     return false;
   }
@@ -62,9 +62,9 @@ bool USBHostBase::putMessage(usb_msg_t &msg) {
 }
 
 bool USBHostBase::timerMsg(usb_msg_t &msg, uint32_t ms) {
-  TimerMsg *t = new (std::nothrow) TimerMsg(msg, ms, *this);
+  TimerMsg *t = new (std::nothrow) TimerMsg(msg, *this);
   if (t != NULL) {
-    if (atomTimerRegister(t) == ATOM_OK)
+    if (t->Register_ms(ms) == ATOM_OK)
       return true;
     dprintf("Registering timer<%p> failed\n", t);
     digitalWriteFast(LED_BUILTIN, HIGH);
@@ -73,12 +73,10 @@ bool USBHostBase::timerMsg(usb_msg_t &msg, uint32_t ms) {
   return false;
 }
 
-void USBHostBase::TimerMsg::timer_callback(POINTER cb_data) {
-  TimerMsg *p = (TimerMsg *)cb_data;
-  if (atomQueuePut(&p->host.usbqueue, -1, &p->msg) == ATOM_WOULDBLOCK) {
+void USBHostBase::TimerMsg::Callback() {
+  if (host.usbqueue.Put(-1, msg) == ATOM_WOULDBLOCK) {
     // queue is full, reschedule to try again
-    p->cb_ticks = 1;
-    if (atomTimerRegister(p) == ATOM_OK)
+    if (Register(1) == ATOM_OK)
       return;
     // else something is wrong, just give up
     digitalWriteFast(LED_BUILTIN, HIGH);
@@ -86,19 +84,9 @@ void USBHostBase::TimerMsg::timer_callback(POINTER cb_data) {
   /* can't delete TimerMsg here because we're in interrupt context
     * so add it to the list to be released later
     */
-  std::atomic<class TimerMsg*> &release_list = p->host.timerRelease;
-  p->next = release_list.load(std::memory_order_relaxed);
-  while (!release_list.compare_exchange_weak(p->next, p, std::memory_order_relaxed));
-}
-
-USBHostBase::TimerMsg::TimerMsg(const usb_msg_t &_msg, uint32_t ms, USBHostBase &h) :
-msg(_msg),
-host(h) {
-  cb_func = timer_callback;
-  cb_data = this;
-  cb_ticks = (ms * SYSTEM_TICKS_PER_SEC + 999) / 1000;
-  next = NULL;
-  //dprintf("TIMER %p: %lu ms -> %lu ticks\n", this, ms, cb_ticks);
+  std::atomic<class TimerMsg*> &release_list = host.timerRelease;
+  next = release_list.load(std::memory_order_relaxed);
+  while (!release_list.compare_exchange_weak(next, this, std::memory_order_relaxed));
 }
 
 USBHostBase::TimerMsg::~TimerMsg() {
@@ -152,9 +140,9 @@ FLASHMEM void USBHostBase::phy_on(usb_phy_t *const PHY) {
 FLASHMEM void USBHostBase::thread_start(thread_param_t _p) {
   auto p = (USBHostBase*)_p;
   usb_msg_t msgs[50];
-  atomQueueCreate(&p->usbqueue, msgs, sizeof(msgs[0]), sizeof(msgs) / sizeof(msgs[0]));
+  p->usbqueue.Init(msgs, sizeof(msgs));
   p->thread();
-  atomQueueDelete(&p->usbqueue);
+  p->usbqueue.Deinit();
 }
 
 FLASHMEM void USBHostBase::begin(void) {
@@ -163,8 +151,8 @@ FLASHMEM void USBHostBase::begin(void) {
 
 bool USBHostBase::isUSBThread(const USB_Device* p) {
   if (p != NULL) {
-    const USBHostBase &base = static_cast<const USBHostBase&>(deviceToHost(p));
-    const ATOM_TCB* context = atomCurrentContext();
+    auto& base = static_cast<const USBHostBase&>(deviceToHost(p));
+    auto context = atomCurrentContext();
     return (context == NULL || context == &base.usb_thread);
   }
   return false;
@@ -215,7 +203,7 @@ void TeensyUSB<c>::thread(void) {
   CCM_CCGR6 |= CCM_CCGR6_USBOH3(CCM_CCGR_ON);
   phy_on((struct usb_phy_t *)c::phy);
 
-  atomTimerDelay(10 * SYSTEM_TICKS_PER_SEC / 1000);  // 10ms
+  atomTimerDelayms(10);
 
   NVIC_ENABLE_IRQ(c::irq);
   usb_process();
@@ -261,39 +249,35 @@ __attribute__((weak)) int usleep(useconds_t us) {
 
 // synchronous functions implemented using atomThreads (semaphores)
 /* using a template here gives a better chance of the compiler inlining this into
- * the calling function, which avoids using dynamic memory.
+ * the calling function, which avoids using dynamic memory for their lambdas.
  */
 template <class req_fn>
 static int sync_message(const USB_Device* dev, const req_fn& req) {
-  ATOM_SEM sem;
+  AtomSem sem(0);
   int result = -1;
   if (USBHostBase::isUSBThread(dev) == true) {
     errno = EDEADLK;
   } else {
-    if (atomSemCreate(&sem, 0) == ATOM_OK) {
-      int xfer_r;
-      // order of operations is tricky here, follow the numbers
-      USBCallback fn([&](int r) {
-        // USB Host thread performs this action when transfer is complete
-        xfer_r = r;         // 4: actual result of the transfer is stored
-        atomSemPut(&sem);   // 5: unblock main thread
-      });
-      result = req(&fn);     // 1: queue async Control/Bulk/InterruptMessage request
-      if (result >= 0) {    // 2: result of attempt to queue the transfer is checked
-        if (atomSemGet(&sem, 0) == ATOM_OK) {
-                            // 3: main thread blocked on semaphore
-          result = xfer_r;
-          if (result < 0) { // 6: result of the transfer is checked
-            errno = -result;
-          }
-        } else {
-          result = -1;
-          errno = EINTR;
+    int xfer_r;
+    // order of operations is tricky here, follow the numbers
+    USBCallback fn([&](int r) {
+      // USB Host thread performs this action when transfer is complete
+      xfer_r = r;         // 4: actual result of the transfer is stored
+      sem.Put();          // 5: unblock main thread
+    });
+    result = req(&fn);    // 1: queue async Control/Bulk/InterruptMessage request
+    if (result >= 0) {    // 2: result of attempt to queue the transfer is checked
+      if (sem.Get() == ATOM_OK) {
+                          // 3: main thread blocked on semaphore
+        result = xfer_r;
+        if (result < 0) { // 6: result of the transfer is checked
+          errno = -result;
         }
+      } else {
+        result = -1;
+        errno = EINTR;
       }
-      atomSemDelete(&sem);
     }
-    else errno = ENOMEM;
   }
   return result;
 }

@@ -44,13 +44,10 @@ class USB_Cam : public USB_Driver, public USB_Driver::Factory {
     uint8_t *sample;
     isolength *length;
   } iso_transfer;
-  ATOM_QUEUE transferq;
-  iso_transfer transferq_msgs[QUEUE_LENGTH];
+  TAtomQueue<iso_transfer, QUEUE_LENGTH> transferq;
 
-  ATOM_QUEUE inputq;
-  jpeg_frame inputq_msgs[5];
-  ATOM_QUEUE outputq;
-  jpeg_frame outputq_msgs[5];
+  TAtomQueue<jpeg_frame, 5> inputq;
+  TAtomQueue<jpeg_frame, 5> outputq;
 
   USB_Driver* offer(const usb_device_descriptor *d, const usb_configuration_descriptor*, const USB_Device*) override {
     if (getDevice() != NULL) return NULL; // already attached to a device
@@ -69,7 +66,7 @@ class USB_Cam : public USB_Driver, public USB_Driver::Factory {
       if (r >= 0) {
         for (int i=0; i < QUEUE_LENGTH; i++) {
           iso_transfer t = {sample_buf+i*8*wMaxPacketSize, &iso_lengths[i]};
-          atomQueuePut(&transferq, 0, &t);
+          transferq.Put(t);
         }
         printf("Streaming interface is active\n");
         attached = true;
@@ -86,9 +83,9 @@ class USB_Cam : public USB_Driver, public USB_Driver::Factory {
     current_frame.jpegbuf = NULL;
     current_frame.len = 0;
     // empty the transfer queue
-    while (atomQueueGet(&transferq, -1, &t) == ATOM_OK);
+    while (transferq.Get(-1, t) == ATOM_OK);
     // empty the input queue
-    while (atomQueueGet(&inputq, -1, &f) == ATOM_OK);
+    while (inputq.Get(-1, f) == ATOM_OK);
     free(sample_buf);
   }
 
@@ -96,7 +93,7 @@ class USB_Cam : public USB_Driver, public USB_Driver::Factory {
     auto iso_cb = [=, &lengths](int r) {
       const uint8_t *p = dst;
       if (current_frame.jpegbuf == NULL) {
-        if (atomQueueGet(&inputq, -1, &current_frame) == ATOM_OK)
+        if (inputq.Get(-1, current_frame) == ATOM_OK)
           current_frame.len = -1; // wait for start of a new frame
       }
       for (int i=0; i < 8; i++, p+= wMaxPacketSize) {
@@ -119,10 +116,10 @@ class USB_Cam : public USB_Driver, public USB_Driver::Factory {
               current_frame.len = 0; // a new frame is starting - start collecting packets
             else {
               if (current_frame.jpegbuf) {
-                atomQueuePut(&outputq, -1, &current_frame);
+                outputq.Put(-1, current_frame);
                 current_frame.jpegbuf = NULL;
               }
-              if (atomQueueGet(&inputq, -1, &current_frame) == ATOM_OK)
+              if (inputq.Get(-1, current_frame) == ATOM_OK)
                 current_frame.len = 0;
             }
           }
@@ -135,7 +132,7 @@ class USB_Cam : public USB_Driver, public USB_Driver::Factory {
       }
       // otherwise put this transfer in the idle queue
       iso_transfer t = {dst, &lengths};
-      atomQueuePut(&transferq, -1, &t);
+      transferq.Put(-1, t);
     };
 
     for (int i=0; i < 8; i++)
@@ -144,16 +141,8 @@ class USB_Cam : public USB_Driver, public USB_Driver::Factory {
   }
 
 public:
-  USB_Cam() {
-    atomQueueCreate(&transferq, transferq_msgs, sizeof(transferq_msgs[0]), sizeof(transferq_msgs)/sizeof(transferq_msgs[0]));
-    atomQueueCreate(&inputq, inputq_msgs, sizeof(inputq_msgs[0]), sizeof(inputq_msgs)/sizeof(inputq_msgs[0]));
-    atomQueueCreate(&outputq, outputq_msgs, sizeof(outputq_msgs[0]), sizeof(outputq_msgs)/sizeof(outputq_msgs[0]));
-  }
-  ~USB_Cam() {
-    atomQueueDelete(&outputq);
-    atomQueueDelete(&inputq);
-    atomQueueDelete(&transferq);
-  }
+  USB_Cam() = default;
+  ~USB_Cam() = default;
   operator bool() {
     return attached;
   }
@@ -161,10 +150,10 @@ public:
   void submitBuffer(uint8_t *pic, int length) {
     if (attached) {
       jpeg_frame f = {pic, length};
-      if (atomQueuePut(&inputq, -1, &f) == ATOM_OK) {
+      if (inputq.Put(-1, f) == ATOM_OK) {
         iso_transfer t;
         // start any/all idle transfers
-        while (atomQueueGet(&transferq, -1, &t) == ATOM_OK) {
+        while (transferq.Get(-1, t) == ATOM_OK) {
           run_iso(t.sample, *t.length);
         }
       }
@@ -174,7 +163,7 @@ public:
   uint8_t* getBuffer(int &length) {
     if (attached) {
       jpeg_frame f;
-      if (atomQueueGet(&outputq, 100, &f) == ATOM_OK) {
+      if (outputq.Get(100, f) == ATOM_OK) {
         if (f.jpegbuf) {
           length = f.len;
           return f.jpegbuf;

@@ -19,7 +19,7 @@
 #include "../teensy4_usbhost.h"
 #include <cstring>
 
-bool USBMouse::begin(ATOM_QUEUE *q) {
+bool USBMouse::begin(AtomQueue<mouse_event> *q) {
   if (q == NULL) return false;
   /* this odd pattern is to avoid a race condition
    * that could possibly call startPolling twice
@@ -96,7 +96,7 @@ void USBMouse::poll(int result) {
       if (result > 8) result = 8;
       memcpy(&event, report, result);
       event.len = (uint8_t)result;
-      atomQueuePut(queue, -1, &event);
+      queue->Put(1, event);
     }
     if (attached) InterruptMessage(ep_in, report_len, report, &poll_cb);
   }

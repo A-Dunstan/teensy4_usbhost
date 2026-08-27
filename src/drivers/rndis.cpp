@@ -32,10 +32,9 @@
 void USB_RNDIS::verifyCommandSent(int r, uint32_t MessageLength) {
   if (r < (int)MessageLength) {
     printf("bad command transfer length: %lu %d\n", MessageLength, r);
-    auto s = atomMutexGet(&lock, 10);
+    auto lock = mutex.Lock(10);
     resp_buf[0] = resp_buf[1] = 0;
-    atomCondSignal(&cmd_signal);
-    if (s == ATOM_OK) atomMutexPut(&lock);
+    cmd_signal.Signal();
   }
 }
 
@@ -56,7 +55,7 @@ const typename ccommand::response_t* USB_RNDIS::sendCommand(const ccommand& cmd,
     puts("Failed to queue command for sending\n");
     return NULL;
   }
-  if (atomCondWait(&cmd_signal, &lock, CONTROL_TIMEOUT) != ATOM_OK) {
+  if (cmd_signal.Wait(&mutex, CONTROL_TIMEOUT) != ATOM_OK) {
     puts("Failed to get command response signal");
     return NULL;
   }
@@ -92,7 +91,7 @@ void USB_RNDIS::control_in(int r) {
       case RNDIS_MSG_RESET_CMPLT:
       case RNDIS_MSG_KEEPALIVE_CMPLT:
         // response to request has arrived, let main thread know
-        atomCondSignal(&cmd_signal);
+        cmd_signal.Signal();
         break;
       case RNDIS_MSG_KEEPALIVE:
         // device wants to know if we're alive...
@@ -102,7 +101,7 @@ void USB_RNDIS::control_in(int r) {
             .type = DRIVER_MSG_KEEPALIVE_REQUEST,
             .RequestID = resp_buf[2] // RequestID
           };
-          atomQueuePut(&queue, -1, &keepalive_request);
+          queue.Put(-1, keepalive_request);
         } // else send indicate status to signal error?
         break;
       case RNDIS_MSG_INDICATE_STATUS:
@@ -115,7 +114,7 @@ void USB_RNDIS::control_in(int r) {
           else {
             // return it to the waiting handler
             printf("RNDIS Indicate_Status: %08lx\n", s->Status);
-            atomCondSignal(&cmd_signal);
+            cmd_signal.Signal();
           }
           break;
         }
@@ -126,15 +125,15 @@ void USB_RNDIS::control_in(int r) {
     InterruptMessage(status_endpoint, 8, status, &status_cb);
   }
   else printf("Unexpected control response: %d %lu %lu\n", r, MessageType, MessageLength);
-  atomMutexPut(&lock);
+  mutex.Put();
 }
 
 void USB_RNDIS::status_in(int r) {
   if (r==8 && status[0]==1) {
-    if (atomMutexGet(&lock, 0) == ATOM_OK) {
+    if (mutex.Get() == ATOM_OK) {
       if (ControlMessage(USB_REQTYPE_INTERFACE_GET|USB_CTRLTYPE_TYPE_CLASS, CDC_CMD_GET_ENCAPSULATED, 0, control_interface, sizeof(resp_buf), resp_buf, &control_cb) < 0) {
         puts("Failed to retrieve RNDIS control response");
-        atomMutexPut(&lock);
+        mutex.Put();
       }
     }
     else puts("Status in failed to get lock");
@@ -155,10 +154,10 @@ uint32_t USB_RNDIS::rndis_set(uint32_t OID, const void* setIn, uint32_t lengthIn
   set->Reserved = 0;
   if (lengthIn) memcpy(set->OIDInputBuffer, setIn, lengthIn);
 
-  if (atomMutexGet(&lock, 0) == ATOM_OK) {
+  auto lock = mutex.Lock(0);
+  if (lock) {
     auto sc = sendCommand(*set);
     if (sc) status = sc->Status;
-    atomMutexPut(&lock);
   }
 
   return status;
@@ -177,7 +176,8 @@ uint32_t USB_RNDIS::rndis_query(uint32_t OID, void* queryOut, uint32_t lengthOut
   query->Reserved = 0;
   if (lengthIn) memcpy(query->OIDInputBuffer, queryIn, lengthIn);
 
-  if (atomMutexGet(&lock, 0) == ATOM_OK) {
+  auto lock = mutex.Lock(0);
+  if (lock) {
     auto qc = sendCommand(*query);
     if (qc && qc->Status == RNDIS_STATUS_SUCCESS) {
       r = qc->InformationBufferLength;
@@ -187,7 +187,6 @@ uint32_t USB_RNDIS::rndis_query(uint32_t OID, void* queryOut, uint32_t lengthOut
         memcpy(queryOut, qc->OIDInputBuffer+offset, lengthOut);
       }
     }
-    atomMutexPut(&lock);
   }
   return r;
 }
@@ -326,7 +325,8 @@ void USB_RNDIS::rndis_initialize(void) {
     .MinorVersion = 0,
     .MaxTransferSize = sizeof(resp_buf)
   };
-  if (atomMutexGet(&lock, 0) == ATOM_OK) {
+  auto lock = mutex.Lock(0);
+  if (lock) {
     auto init_cmplt = sendCommand(initmsg);
     if (init_cmplt && init_cmplt->Status==RNDIS_STATUS_SUCCESS) {
       printf("Initialization complete:\n");
@@ -341,19 +341,18 @@ void USB_RNDIS::rndis_initialize(void) {
       max_transfer_size = init_cmplt->MaxTransferSize;
       init_oids();
     }
-    atomMutexPut(&lock);
   }
 }
 
 void USB_RNDIS::threadproc(void) {
   driver_msg msg;
-  while (atomQueueGet(&queue, 0, &msg) == ATOM_OK) {
+  while (queue.Get(msg) == ATOM_OK) {
     if (msg.type != DRIVER_MSG_RECV)
       printf("RNDIS thread drivermsg: %d\n", msg.type);
     switch (msg.type) {
       case DRIVER_MSG_RECV:
         *(msg.len) = data_unpack(msg.buf);
-        atomSemPut(msg.signal);
+        msg.signal->Put();
         break;
       case DRIVER_MSG_GET_MAC_ADDR:
         if (link_speed > 0) {
@@ -361,7 +360,7 @@ void USB_RNDIS::threadproc(void) {
         } else {
           memset(msg.buf, 0, 6);
         }
-        atomSemPut(msg.signal);
+        msg.signal->Put();
         break;
       case DRIVER_MSG_KEEPALIVE_REQUEST:
         {
@@ -483,53 +482,45 @@ bool USB_RNDIS::attach(const usb_device_descriptor*,const usb_configuration_desc
   driver_msg msg = {
     .type = DRIVER_MSG_ATTACH
   };
-  return atomQueuePut(&queue, 1, &msg) == ATOM_OK;
+  return queue.Put(1, msg) == ATOM_OK;
 }
 
 void USB_RNDIS::detach(void) {
   driver_msg msg = {
     .type = DRIVER_MSG_DETACH
   };
-  atomQueuePut(&queue, 1, &msg);
+  queue.Put(1, msg);
 }
 
 USB_RNDIS::USB_RNDIS(void) {
-  atomQueueCreate(&queue, &q_msgs, sizeof(q_msgs[0]), sizeof(q_msgs)/sizeof(q_msgs[0]));
   atomThreadCreate(&thread, 96, thread_start, this, stack, sizeof(stack), 0);
-  atomMutexCreate(&lock);
-  atomCondCreate(&cmd_signal);
 }
 
 void USB_RNDIS::get_mac_address(uint8_t mac[6]) {
-  ATOM_SEM signal;
+  AtomSem signal(0);
   driver_msg msg = {
     .type = DRIVER_MSG_GET_MAC_ADDR,
     .buf = mac,
     .signal = &signal
   };
-  if (atomSemCreate(&signal, 0) == ATOM_OK) {
-    if (atomQueuePut(&queue, 0, &msg) == ATOM_OK) {
-      atomSemGet(&signal, 0);
-    }
-    atomSemDelete(&signal);
-  }
+
+  if (queue.Put(msg) == ATOM_OK)
+    signal.Get();
 }
 
 size_t USB_RNDIS::recv(void* p) {
   size_t r = 0;
-  ATOM_SEM signal;
+  AtomSem signal(0);
   driver_msg msg = {
     .type = DRIVER_MSG_RECV,
     .buf = p,
     .len = &r,
     .signal = &signal
   };
-  if (atomSemCreate(&signal, 0) == ATOM_OK) {
-    if (atomQueuePut(&queue, 0, &msg) == ATOM_OK) {
-      atomSemGet(&signal, 0);
-    }
-    atomSemDelete(&signal);
-  }
+
+  if (queue.Put(msg) == ATOM_OK)
+    signal.Get();
+
   return r;
 }
 

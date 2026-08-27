@@ -27,8 +27,8 @@
  * Have fun with that!
  */
 
-#define CBW_SIGNATURE 0x43425355   // 'USBC'
-#define CSW_SIGNATURE 0x53425355   // 'USBS'
+#define CBW_SIGNATURE (('U' << 0) | ('S' << 8) | ('B' << 16) | ('C' << 24))
+#define CSW_SIGNATURE (('U' << 0) | ('S' << 8) | ('B' << 16) | ('S' << 24))
 #define CBW_OUT   USB_CTRLTYPE_DIR_HOST2DEVICE
 #define CBW_IN    USB_CTRLTYPE_DIR_DEVICE2HOST
 
@@ -55,7 +55,7 @@
 #define USBMS_REQ_RESET        255
 
 std::list<USB_Storage*> USB_Storage::devices;
-USB_Storage::mutex_cxx USB_Storage::list_lock;
+AtomMutex USB_Storage::list_lock;
 
 void USB_Storage::begin(void) {
   static Factory StorageFactory;
@@ -68,10 +68,9 @@ void USB_Storage::deref(void) {
 }
 
 void USB_Storage::detach(void) {
-  {
-    auto lock = list_lock.autolock();
-    devices.remove(this);
-  }
+  auto lock = list_lock.Lock(AUTOLOCK_TICKS);
+  devices.remove(this);
+  lock.Unlock();
 
   lun_count = 0;
   deref();
@@ -137,17 +136,16 @@ bool USB_Storage::attach(const usb_interface_descriptor* id, size_t s) {
       else
         lun_count = 1;
 
-      auto lock = list_lock.autolock();
+      auto lock = list_lock.Lock(AUTOLOCK_TICKS);
       devices.push_back(this);
     }
   }) >= 0;
 }
 
 USB_Storage* USB_Storage::open_device(size_t index) {
-  auto lock = list_lock.autolock();
-  for (auto it = devices.begin(); it != devices.end(); it++) {
+  auto lock = list_lock.Lock(AUTOLOCK_TICKS);
+  for (auto ms : devices) {
     if (index == 0) {
-      USB_Storage *ms = *it;
       ms->addref();
       return ms;
     }
@@ -171,7 +169,7 @@ void USB_Storage::reset(void) {
 }
 
 int USB_Storage::scsi_cmd(uint8_t lun, void* data, size_t length, const uint8_t* command, bool write) {
-  auto lck = cmd_lock.autolock();
+  auto lck = cmd_lock.Lock(AUTOLOCK_TICKS);
   if (!lck) {
     errno = ETIMEDOUT;
     return -1;

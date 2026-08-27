@@ -85,8 +85,8 @@ private:
   uint8_t *tx_buf[2];
   uint32_t tx_length;
   uint32_t tx_max;
-  ATOM_MUTEX tx_lock;
-  ATOM_COND tx_signal;
+  AtomMutex tx_lock;
+  AtomCond tx_signal;
 
   EventResponder event_timer;
   static void send_timer_expired(EventResponder&);
@@ -95,7 +95,7 @@ private:
   void read_callback(int result, uint8_t* buf);
   void queue_read(uint8_t *buf);
   uint8_t *rx_buf[2];
-  ATOM_MUTEX rx_lock;
+  AtomMutex rx_lock;
 
   circ_buf<512> read_buf;
 public:

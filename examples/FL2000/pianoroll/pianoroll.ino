@@ -7,7 +7,7 @@
 static DMAMEM TeensyUSBHost2 usb;
 static FL2000 fl2000;
 static EventResponder monitor_responder;
-ATOM_SEM frame_done;
+AtomSem frame_done(0, 1);
 
 /* 640x200 = 128000
  * rounded up to nearest power of two = 131072 (2^17)
@@ -68,9 +68,8 @@ void monitor_event(EventResponder& ev) {
       monitor->setFrame(fb, WIDTH);
       break;
     case MONITOR_NOTIFY_FRAMEDONE:
-      if (!paused) {
-        atomSemPut(&frame_done);
-      }
+      if (!paused)
+        frame_done.Put();
       break;
     case MONITOR_NOTIFY_EDID:
       break;
@@ -93,7 +92,6 @@ void setup() {
   }
 
   memset(fb, 0, sizeof(fb));
-  atomSemCreateLimit(&frame_done, 0, 1);
   monitor_responder.attach(monitor_event);
   fl2000.set_monitor_event(&monitor_responder);
 
@@ -159,7 +157,7 @@ void loop() {
     }
   }
 
-  if (atomSemGet(&frame_done, -1) == ATOM_OK)
+  if (frame_done.Get(-1) == ATOM_OK)
     render();
 
   if (Serial.read() == 'p')

@@ -44,16 +44,16 @@ class USBHostBase : public USB_Host {
   uint32_t getMillis(void) override;
 
 private:
-  ATOM_QUEUE usbqueue;
+  AtomQueue<usb_msg_t> usbqueue;
 
-  class TimerMsg : public ATOM_TIMER {
-    static void timer_callback(POINTER cb_data);
+  class TimerMsg : public AtomTimer {
+    void Callback() override;
 
     usb_msg_t msg;
     USBHostBase& host;
-    class TimerMsg *next;
+    class TimerMsg *next = NULL;
   public:
-    TimerMsg(const usb_msg_t &_msg, uint32_t ms, USBHostBase &h);
+    TimerMsg(const usb_msg_t &_msg, USBHostBase &h) : msg(_msg), host(h) {}
     ~TimerMsg();
   };
   std::atomic<TimerMsg*> timerRelease = NULL;

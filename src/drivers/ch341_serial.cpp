@@ -208,36 +208,35 @@ void serial::get_status(void) {
 }
 
 void serial::read_callback(int result, uint8_t *buf) {
-  if (atomMutexGet(&rx_lock, 10) == ATOM_OK) {
+  auto lock = rx_lock.Lock(10);
+  if (lock) {
     if (result >= 0) {
       read_buf.write(buf, (size_t)result);
     }
-    atomMutexPut(&rx_lock);
+    lock.Unlock();
   }
   if (result != -ENXIO)
     queue_read(buf);
 }
 
 void serial::queue_read(uint8_t *buf) {
-  if (atomMutexGet(&rx_lock, 1) == ATOM_OK) {
-    do {
-      uint32_t to_read = (uint32_t)read_buf.availableForWrite();
-      if (started && to_read) {
-        USBCallback fn( [=](int r) {read_callback(r, buf);} );
-        if (to_read > sizeof(data_in[0])) to_read = sizeof(data_in[0]);
-        if (BulkMessage(ep_in, to_read, buf, fn) >= 0) {
-          break;
-        }
-      }
-      if (rx_buf[0] == NULL) rx_buf[0] = buf;
-      else rx_buf[1] = buf;
-    } while(0);
-    atomMutexPut(&rx_lock);
+  auto lock = rx_lock.Lock(1);
+  if (lock) {
+    uint32_t to_read = (uint32_t)read_buf.availableForWrite();
+    if (started && to_read) {
+      USBCallback fn( [=](int r) {read_callback(r, buf);} );
+      if (to_read > sizeof(data_in[0])) to_read = sizeof(data_in[0]);
+      if (BulkMessage(ep_in, to_read, buf, fn) >= 0)
+        return;
+    }
+    if (rx_buf[0] == NULL) rx_buf[0] = buf;
+    else rx_buf[1] = buf;
   }
 }
 
 void serial::dtr_rts_callback(int result, uint8_t old_status, uint8_t new_status) {
-  if (atomMutexGet(&rx_lock, 10) == ATOM_OK) {
+  auto lock = rx_lock.Lock(10);
+  if (lock) {
     if (result < 0) {
       dprintf("Setting new DTR/RTS failed %d\n", result);
       out_status = old_status;
@@ -245,7 +244,6 @@ void serial::dtr_rts_callback(int result, uint8_t old_status, uint8_t new_status
       dprintf("Setting new DTR/RTS succeeded\n");
       out_status = new_status;
     }
-    atomMutexPut(&rx_lock);
   }
 }
 
@@ -260,8 +258,9 @@ void serial::set_dtr_rts(uint8_t new_status) {
 }
 
 void serial::start(void) {
-  uint8_t t = atomMutexGet(&tx_lock, 1);
-  if (atomMutexGet(&rx_lock, 1) == ATOM_OK) {
+  auto txlock = tx_lock.Lock(1);
+  auto rxlock = rx_lock.Lock(1);
+  if (rxlock) {
     if (hw_flow) set_dtr_rts(CH341_STATUS_DTR|CH341_STATUS_RTS);
     if (!started) {
       started = true;
@@ -277,10 +276,7 @@ void serial::start(void) {
         queue_read(b);
       }
     }
-
-    atomMutexPut(&rx_lock);
   }
-  if (t == ATOM_OK) atomMutexPut(&tx_lock);
 }
 
 void serial::init(int result, unsigned int stage) {
@@ -332,9 +328,6 @@ void serial::send_timer_expired(EventResponder& e) {
 serial::serial() {
   event_timer.setContext(this);
   event_timer.attach(send_timer_expired);
-  atomMutexCreate(&tx_lock);
-  atomMutexCreate(&rx_lock);
-  atomCondCreate(&tx_signal);
 
   tx_buf[0] = data_out[0];
   tx_buf[1] = data_out[1];
@@ -359,22 +352,16 @@ serial::~serial() {
   }
 
   event_timer.detach();
-
-  atomCondDelete(&tx_signal);
-  atomMutexDelete(&tx_lock);
-  atomMutexDelete(&rx_lock);
 }
 
 void serial::detach(void) {
-  uint8_t t = atomMutexGet(&tx_lock, 10);
-  uint8_t r = atomMutexGet(&rx_lock, 10);
+  auto tx = tx_lock.Lock(10);
+  auto rx = rx_lock.Lock(10);
   sendTimer.end();
   started = false;
   attached = false;
   status = 0;
 
-  if (t == ATOM_OK) atomMutexPut(&tx_lock);
-  if (r == ATOM_OK) atomMutexPut(&rx_lock);
   dprintf("ch341::serial Detached\n");
 }
 
@@ -423,9 +410,10 @@ USB_Driver* serial::offer(const usb_device_descriptor* d,const usb_configuration
 }
 
 bool serial::attach(const usb_device_descriptor*,const usb_configuration_descriptor* c) {
-  if (atomMutexGet(&rx_lock, 10) == ATOM_OK) {
+  auto lock = rx_lock.Lock(10);
+  if (lock) {
     out_status = 0;
-    atomMutexPut(&rx_lock);
+    lock.Unlock();
   }
   started = false;
   status = 0;
@@ -462,36 +450,37 @@ void serial::begin(uint32_t baud, uint16_t format, bool rts_cts) {
 
 void serial::end() {
   started = false;
-  if (atomMutexGet(&rx_lock, 1) == ATOM_OK) {
+  auto lock = rx_lock.Lock(1);
+  if (lock) {
     set_dtr_rts(0);
-    atomMutexPut(&rx_lock);
   }
 }
 
 int serial::available() {
   int ret = 0;
-  if (atomMutexGet(&rx_lock, 1) == ATOM_OK) {
+  auto lock = rx_lock.Lock(1);
+  if (lock) {
     size_t s = read_buf.available();
     if (s) ret = (int)s;
-    atomMutexPut(&rx_lock);
   }
   return ret;
 }
 
 int serial::peek() {
   int ret = -1;
-  if (atomMutexGet(&rx_lock, 1) == ATOM_OK) {
+  auto lock = rx_lock.Lock(1);
+  if (lock) {
     if (read_buf.available() > 0) {
       ret = *read_buf.peek();
     }
-    atomMutexPut(&rx_lock);
   }
   return ret;
 }
 
 int serial::read() {
   int ret = -1;
-  if (atomMutexGet(&rx_lock, 1) == ATOM_OK) {
+  auto lock = rx_lock.Lock(1);
+  if (lock) {
     if (read_buf.available() > 0) {
       uint8_t c;
       read_buf.read(&c, 1);
@@ -505,30 +494,30 @@ int serial::read() {
         queue_read(buf);
       }
     }
-    atomMutexPut(&rx_lock);
   }
   return ret;
 }
 
 int serial::availableForWrite() {
   int ret=0;
-  if (atomMutexGet(&tx_lock, 1) == ATOM_OK) {
+  auto lock = tx_lock.Lock(1);
+  if (lock) {
     if (started && (!hw_flow || (status & CH341_STATUS_CTS))) {
       if (tx_buf[0] && tx_length < tx_max) {
         ret = (int)(tx_max - tx_length);
       }
     }
-    atomMutexPut(&tx_lock);
   }
   return ret;
 }
 
 size_t serial::write(uint8_t c) {
   size_t ret = 0;
-  if (atomMutexGet(&tx_lock, 1) == ATOM_OK) {
+  auto lock = tx_lock.Lock(1);
+  if (lock) {
     if (started) {
       if (tx_buf[0] == NULL) {
-        if (atomCondWait(&tx_signal, &tx_lock, 50) != ATOM_OK) {
+        if (tx_signal.Wait(&tx_lock, 50) != ATOM_OK) {
           dprintf("Failed to get TX signal\n");
         }
       }
@@ -543,7 +532,6 @@ size_t serial::write(uint8_t c) {
           flush();
       }
     }
-    atomMutexPut(&tx_lock);
   }
   else dprintf("Failed to get tx_lock\n");
   return ret;
@@ -552,7 +540,8 @@ size_t serial::write(uint8_t c) {
 void serial::write_callback(int result, uint8_t *buf) {
   if (result < 0) dprintf("write failed: %d\n", result);
   // don't care about the result - buffer is now free, recycle it
-  if (atomMutexGet(&tx_lock, 10) == ATOM_OK) {
+  auto lock = tx_lock.Lock(1);
+  if (lock) {
     if (tx_buf[0] == NULL) { // use it immediately
       tx_buf[0] = buf;
       tx_length = 0;
@@ -560,13 +549,13 @@ void serial::write_callback(int result, uint8_t *buf) {
     else { // queue it for later use
       tx_buf[1] = buf;
     }
-    atomCondSignal(&tx_signal);
-    atomMutexPut(&tx_lock);
+    tx_signal.Signal();
   }
 }
 
 void serial::flush(void) {
-  if (atomMutexGet(&tx_lock, 10) == ATOM_OK) {
+  auto lock = tx_lock.Lock(10);
+  if (lock) {
     if (started) {
       sendTimer.end();
       if (tx_buf[0] && tx_length>0) {
@@ -581,34 +570,31 @@ void serial::flush(void) {
         tx_length = tx_buf[0] ? 0 : tx_max;
       }
     }
-    atomMutexPut(&tx_lock);
   }
 }
 
 void serial::set_dtr_rts(bool dtr, bool rts) {
-  if (atomMutexGet(&rx_lock, 1) == ATOM_OK) {
-    if (attached) {
-      uint8_t s = (rts ? CH341_STATUS_RTS : 0);
-      s |= (dtr ? CH341_STATUS_DTR : 0);
-      set_dtr_rts(s);
-    }
-    atomMutexPut(&rx_lock);
+  auto lock = rx_lock.Lock(1);
+  if (lock && attached) {
+    uint8_t s = (rts ? CH341_STATUS_RTS : 0);
+    s |= (dtr ? CH341_STATUS_DTR : 0);
+    set_dtr_rts(s);
   }
 }
 
 void serial::set_dtr(bool set) {
-  if (atomMutexGet(&rx_lock, 1) == ATOM_OK) {
+  auto lock = rx_lock.Lock(1);
+  if (lock) {
     set_dtr_rts((out_status & ~CH341_STATUS_DTR) | (set ? CH341_STATUS_DTR : 0));
-    atomMutexPut(&rx_lock);
   }
 }
 
 void serial::set_rts(bool set) {
   // don't allow controlling RTS if hardware flow control is in use
   if (hw_flow) return;
-  if (atomMutexGet(&rx_lock, 1) == ATOM_OK) {
+  auto lock = rx_lock.Lock(1);
+  if (lock) {
     set_dtr_rts((out_status & ~CH341_STATUS_RTS) | (set ? CH341_STATUS_RTS : 0));
-    atomMutexPut(&rx_lock);
   }
 }
 

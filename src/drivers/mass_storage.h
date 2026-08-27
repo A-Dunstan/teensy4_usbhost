@@ -64,30 +64,10 @@ private:
    * threads so it needs to be guarded.
    */
   static std::list<class USB_Storage*> devices;
+  static AtomMutex list_lock;
+  enum { AUTOLOCK_TICKS = SYSTEM_TICKS_PER_SEC*5 };
 
-  /* utility class for a mutex. autolock() returns an object that holds the mutex for
-   * as long as it exists.
-   */
-  class mutex_cxx {
-  private:
-    ATOM_MUTEX mtx;
-  public:
-    mutex_cxx() { atomMutexCreate(&mtx); }
-    ~mutex_cxx() { atomMutexDelete(&mtx); }
-
-    class auto_lock {
-    private:
-      ATOM_MUTEX *lck;
-    public:
-      auto_lock(ATOM_MUTEX *g) : lck(atomMutexGet(g, SYSTEM_TICKS_PER_SEC*5)==ATOM_OK ? g:NULL) {}
-      ~auto_lock() { if (lck != NULL) atomMutexPut(lck); }
-      operator bool() { return lck != NULL; }
-    };
-    class auto_lock autolock(void) { return auto_lock(&mtx); }
-  };
-  // actual mutex object that guards access to the device list
-  static mutex_cxx list_lock;
-  mutex_cxx cmd_lock;
+  AtomMutex cmd_lock;
 
   bool attach(const usb_interface_descriptor*,size_t) override;
 
@@ -107,7 +87,7 @@ public:
 
   // return number of attached USB Storage devices
   static size_t get_device_count(void) {
-    auto lck = list_lock.autolock();
+    auto lck = list_lock.Lock(AUTOLOCK_TICKS);
     return devices.size();
   }
   // return a handle to a USB Storage device

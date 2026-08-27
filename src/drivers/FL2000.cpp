@@ -86,7 +86,7 @@ static const struct mode_timing vid_modes[] PROGMEM = {
 
 struct sync_request {
   int result;
-  ATOM_SEM sema;
+  AtomSem sema = AtomSem(0);
 };
 
 struct mode_request : sync_request {
@@ -160,21 +160,21 @@ void FL2000::thread(void) {
       dbg_log("Interrupt arrived");
 
       threadMsg msg = {CMD_INTERRUPT};
-      if (atomQueuePut(&workQueue, -1, &msg) != ATOM_OK) {
+      if (workQueue.Put(-1, msg) != ATOM_OK) {
         dbg_log("Failed to queue interrupt");
       }
     }
     else dbg_log("Interrupt returned error: %d", r);
   };
 
-  if (atomQueueCreate(&workQueue, msgs, sizeof(msgs[0]), sizeof(msgs)/sizeof(msgs[0])) == ATOM_OK) {
+  if (workQueue.Init(msgs, sizeof(msgs)) == ATOM_OK) {
     threadMsg msg;
 
     dbg_log("thread started");
 
     int status = 0;
     do {
-      if (atomQueueGet(&workQueue, 0, &msg) != ATOM_OK)
+      if (workQueue.Get(msg) != ATOM_OK)
         break;
 
       switch (msg.cmd) {
@@ -201,7 +201,7 @@ void FL2000::thread(void) {
             break;
           }
           msg.mode_req->result = set_mode(msg.mode_req->mode, msg.mode_req->input_format, msg.mode_req->output_format);
-          atomSemPut(&msg.mode_req->sema);
+          msg.mode_req->sema.Put();
           break;
         case CMD_SEND_SLICE:
           send_slice(msg.slice.s, msg.slice.len);
@@ -226,7 +226,7 @@ void FL2000::thread(void) {
           next_fb = (uint8_t*)msg.frame_req->src;
           next_fixed_bits = msg.frame_req->fixed_bits;
           msg.frame_req->result = (current_fb == NULL && max_lines) ? frame_begin() : 0;
-          atomSemPut(&msg.frame_req->sema);
+          msg.frame_req->sema.Put();
           break;
         case CMD_SET_PALETTE:
           msg.pal_req->result = 0;
@@ -242,11 +242,11 @@ void FL2000::thread(void) {
               break;
             }
           }
-          atomSemPut(&msg.pal_req->sema);
+          msg.pal_req->sema.Put();
           break;
         case CMD_FETCH_EDID:
           msg.edid_req->result = read_edid_block(msg.edid_req->block, msg.edid_req->dst);
-          atomSemPut(&msg.edid_req->sema);
+          msg.edid_req->sema.Put();
           break;
         default:
           dbg_log("Unknown command: %u", msg.cmd);
@@ -254,7 +254,7 @@ void FL2000::thread(void) {
       }
     } while (status >= 0);
 
-    atomQueueDelete(&workQueue);
+    workQueue.Deinit();
   }
   else dbg_log("Failed to create workQueue");
 
@@ -760,13 +760,13 @@ FLASHMEM USB_Driver* FL2000::offer(const usb_device_descriptor* d, const usb_con
 FLASHMEM bool FL2000::attach(const usb_device_descriptor *d, const usb_configuration_descriptor*) {
   dbg_log("ATTACH");
   threadMsg msg = {CMD_ATTACH};
-  return atomQueuePut(&workQueue, 10, &msg) == ATOM_OK;
+  return workQueue.Put(10, msg);
 }
 
 FLASHMEM void FL2000::detach(void) {
   dbg_log("DETACH");
   threadMsg msg = {CMD_DETACH};
-  atomQueuePut(&workQueue, 10, &msg);
+  workQueue.Put(10, msg);
 }
 
 FLASHMEM FL2000::FL2000() {
@@ -793,20 +793,15 @@ int FL2000::forwardMsg(sync_request& req, threadMsg& msg) {
   auto context = atomCurrentContext();
   if (context == NULL || context == &workThread)
     errno = EDEADLK;
-  else if (atomSemCreate(&req.sema, 0) == ATOM_OK) {
-    if (atomQueuePut(&workQueue, 0, &msg) != ATOM_OK) {
-      errno = ENXIO;
-    } else if (atomSemGet(&req.sema, 0) != ATOM_OK) {
-      errno = EBUSY;
-    } else if (req.result < 0) {
-      errno = -req.result;
-    } else {
-      ret = req.result;
-    }
-
-    atomSemDelete(&req.sema);
+  else if (workQueue.Put(msg) != ATOM_OK) {
+    errno = ENXIO;
+  } else if (req.sema.Get() != ATOM_OK) {
+    errno = EBUSY;
+  } else if (req.result < 0) {
+    errno = -req.result;
+  } else {
+    ret = req.result;
   }
-  else errno = ENOLCK;
 
   return ret;
 }
@@ -1034,7 +1029,7 @@ void FL2000::convert_dma(slice_data* s, uint32_t height) {
         .len = slice_size
       }
     };
-    if (atomQueuePut(&workQueue, -1, &msg) != ATOM_OK) {
+    if (workQueue.Put(-1, msg) != ATOM_OK) {
       dbg_log("Failed to send CMD_SEND_SLICE");
     }
   };
@@ -1807,7 +1802,7 @@ void FL2000::send_slice(slice_data *slice, size_t slice_len) {
             .s = slice
           }
         };
-        if (atomQueuePut(&workQueue, -1, &msg) != ATOM_OK) {
+        if (workQueue.Put(-1, msg) != ATOM_OK) {
           dbg_log("Failed to send CMD_FRAME_DONE msg");
         }
       } else {
@@ -1829,7 +1824,7 @@ void FL2000::send_slice(slice_data *slice, size_t slice_len) {
               .s = slice
             }
           };
-          if (atomQueuePut(&workQueue, -1, &msg) != ATOM_OK) {
+          if (workQueue.Put(-1, msg) != ATOM_OK) {
             dbg_log("Failed to send CMD_SLICE_DONE msg");
           }
         }

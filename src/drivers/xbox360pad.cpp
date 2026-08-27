@@ -59,7 +59,7 @@ void XBOX360Pad::interrupt_in(int r) {
 
 void XBOX360Pad::interrupt_out(int r) {
   if (r >= 0) {
-    atomMutexGet(&lock, 10);
+    auto lock = mutex.Lock(10);
     flags &= ~FLAG_INPROGRESS;
 
     if (flags & FLAG_SETLED) {
@@ -69,12 +69,11 @@ void XBOX360Pad::interrupt_out(int r) {
       flags &= ~FLAG_SETRUMBLE;
       setRumble(motor_heavy, motor_light);
     }
-    atomMutexPut(&lock);
   }
 }
 
 FLASHMEM void XBOX360Pad::setLED(uint8_t new_led) {
-  atomMutexGet(&lock, 10);
+  auto lock = mutex.Lock(10);
 
   led = new_led;
   if (flags & FLAG_INPROGRESS) {
@@ -86,11 +85,10 @@ FLASHMEM void XBOX360Pad::setLED(uint8_t new_led) {
     rep_out[2] = led;
     InterruptMessage(ep_out, 3, rep_out, &out_cb);
   }
-  atomMutexPut(&lock);
 }
 
 void XBOX360Pad::setRumble(uint8_t heavy, uint8_t light) {
-  atomMutexGet(&lock, 10);
+  auto lock = mutex.Lock(10);
 
   if (flags & FLAG_INPROGRESS) {
     flags |= FLAG_SETRUMBLE;
@@ -105,7 +103,6 @@ void XBOX360Pad::setRumble(uint8_t heavy, uint8_t light) {
     rep_out[4] = light;
     InterruptMessage(ep_out, 8, rep_out, &out_cb);
   }
-  atomMutexPut(&lock);
 }
 
 FLASHMEM const usb_endpoint_descriptor* XBOX360Pad::find_endpoint(const void* p, size_t& length) {
@@ -167,12 +164,4 @@ FLASHMEM void XBOX360Pad::detach(void) {
   memset(&state, 0, sizeof(state));
   cur_buttons = 0;
   ready = false;
-}
-
-FLASHMEM XBOX360Pad::XBOX360Pad() {
-  atomMutexCreate(&lock);
-}
-
-FLASHMEM XBOX360Pad::~XBOX360Pad() {
-  atomMutexDelete(&lock);
 }

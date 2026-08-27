@@ -18,7 +18,7 @@ AudioConnection p5(audioIn, 1, audioOut, 1);
 static DMAMEM TeensyUSBHost2 usb;
 static FL2000 fl2000;
 static EventResponder monitor_responder;
-ATOM_SEM frame_done;
+AtomSem frame_done(0, 1);
 
 
 // HEIGHT should be less or equal to WIDTH for this example
@@ -75,7 +75,7 @@ void monitor_event(EventResponder& ev) {
     case MONITOR_NOTIFY_FRAMEDONE:
       if (++framecount >= FRAME_INTERVAL) {
         framecount = 0;
-        atomSemPut(&frame_done);
+        frame_done.Put();
       }
       break;
     case MONITOR_NOTIFY_EDID:
@@ -101,7 +101,6 @@ void setup() {
   mixer.gain(0, 0.707);
   mixer.gain(1, 0.707);
 
-  atomSemCreateLimit(&frame_done, 0, 1);
   monitor_responder.attach(monitor_event);
   fl2000.set_monitor_event(&monitor_responder);
 
@@ -177,6 +176,6 @@ static void render(void) {
 }
 
 void loop() {
-  if (atomSemGet(&frame_done, -1) == ATOM_OK)
+  if (frame_done.Get(-1) == ATOM_OK)
     render();
 }

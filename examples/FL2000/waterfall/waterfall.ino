@@ -19,7 +19,7 @@ AudioConnection out2(audioIn, 1, audioOut, 1);
 static DMAMEM TeensyUSBHost2 usb;
 static FL2000 fl2000;
 static EventResponder monitor_responder;
-ATOM_SEM frame_ready;
+AtomSem frame_ready(0, 1);
 
 #define WIDTH 320
 #define HEIGHT 240
@@ -71,7 +71,7 @@ void monitor_event(EventResponder& ev) {
     case MONITOR_NOTIFY_FRAMEDONE:
       if (++framecount >= FRAME_INTERVAL) {
         framecount = 0;
-        atomSemPut(&frame_ready);
+        frame_ready.Put();
       }
       break;
     case MONITOR_NOTIFY_EDID:
@@ -97,7 +97,6 @@ void setup() {
   mixer.gain(0, 0.707);
   mixer.gain(1, 0.707);
 
-  atomSemCreateLimit(&frame_ready, 0, 1);
   memset(fb0, 0, sizeof(fb0));
   monitor_responder.attach(monitor_event);
   fl2000.set_monitor_event(&monitor_responder);
@@ -108,7 +107,7 @@ void setup() {
 static float scale = 12.0;
 
 void loop() {
-  if (atomSemGet(&frame_ready, -1) == ATOM_OK) {
+  if (frame_ready.Get(-1) == ATOM_OK) {
     if (fft1024.available()) {
       // hopefully this happens while in vertical refresh...
       if (fb >= fb0+2*WIDTH) {

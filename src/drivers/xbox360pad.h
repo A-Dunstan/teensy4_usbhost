@@ -43,7 +43,7 @@ class XBOX360Pad : public USB_Driver, public USB_Driver::Factory {
   uint8_t ep_in;
   uint8_t ep_out;
 
-  ATOM_MUTEX lock;
+  AtomMutex mutex;
   uint8_t led;
   uint8_t motor_heavy, motor_light;
   uint32_t flags;
@@ -72,8 +72,8 @@ class XBOX360Pad : public USB_Driver, public USB_Driver::Factory {
   void detach(void) override;
 
 public:
-  XBOX360Pad();
-  ~XBOX360Pad();
+  XBOX360Pad() = default;
+  ~XBOX360Pad() = default;
   operator bool() const { return ready; }
 
   // values 6-9 are the typical player 1-4 indicators

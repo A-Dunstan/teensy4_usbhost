@@ -90,7 +90,7 @@ private:
   struct threadMsg;
 
   ATOM_TCB workThread;
-  ATOM_QUEUE workQueue;
+  AtomQueue<struct threadMsg> workQueue;
   uint32_t workStack[640];
   void thread(void);
   static void threadStart(thread_param_t arg);
