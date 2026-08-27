@@ -72,7 +72,7 @@ void USB_Host::callback(const usb_control_transfer* t, int result) {
   if (result >= 0) {
     if (t == NULL) {
       dprintf("!!! Enumeration begin !!!\n");
-      Enum.Transfer(USB_REQTYPE_DEVICE_GET, USB_REQ_GET_DESCRIPTOR, (USB_DT_DEVICE << 8), 0, sizeof(usb_device_descriptor), NULL, this);
+      Enum.Transfer(USB_REQTYPE_DEVICE_GET, USB_REQ_GET_DESCRIPTOR, (USB_DT_DEVICE << 8), 0, 64, NULL, this);
       return;
     }
 
@@ -102,7 +102,7 @@ void USB_Host::callback(const usb_control_transfer* t, int result) {
       if (result>=8 && desc->bDescriptorType == USB_DT_DEVICE && desc->bLength == sizeof(usb_device_descriptor)) {
         dprintf("Port %d:%d bDeviceClass %02X bDeviceSubClass %02X bDeviceProtocol %02X bMaxPacketSize %d\n", hub.hub_addr, port, desc->bDeviceClass, desc->bDeviceSubClass, desc->bDeviceProtocol, desc->bMaxPacketSize);
         Enum.bMaxPacketSize = desc->bMaxPacketSize;
-        /* this particular device doesn't respond properly to the first SET_ADDRESS request (doesn't return an error but doesn't switch addresses)
+        /* this particular device doesn't respond properly to the first SET_ADDRESS request (doesn't return an error but also doesn't switch addresses)
           * It has a 16-byte packet control endpoint, so VID/PID/bcdDevice will be filled (enumerator uses wMaxPacketSize==64)
           * Workaround: send a request to set address to 0, doesn't matter if it accepts it or not. Also safe for any other devices that end up here.
           */

@@ -157,9 +157,6 @@ void USB_Device::callback(const usb_control_transfer *t, int result) {
               dprintf("   bcdUSB %04X\n   bDeviceClass %02X\n   bDeviceSubClass %02X\n   bDeviceProtocol %02X\n", ddesc.bcdUSB, ddesc.bDeviceClass, ddesc.bDeviceSubClass, ddesc.bDeviceProtocol);
               dprintf("   idVendor %04X\n   idProduct %04X\n   bcdDevice %04X\n", ddesc.idVendor, ddesc.idProduct, ddesc.bcdDevice);
               dprintf("   iManufacturer %d\n   iProduct %d\n   iSerialNumber %d\n   bNumConfigurations %d\n", ddesc.iManufacturer, ddesc.iProduct, ddesc.iSerialNumber, ddesc.bNumConfigurations);
-              if (ddesc.iManufacturer) request_string(ddesc.iManufacturer);
-              if (ddesc.iProduct) request_string(ddesc.iProduct);
-              if (ddesc.iSerialNumber) request_string(ddesc.iSerialNumber);
               // request all configurations (config descriptor only, full size will be retrieved afterwards)
               for (uint8_t c=0; c < ddesc.bNumConfigurations; c++) {
                 control.Transfer(USB_REQTYPE_DEVICE_GET, USB_REQ_GET_DESCRIPTOR, (USB_DT_CONFIGURATION<<8)|c, 0, sizeof(usb_configuration_descriptor), NULL, this);
@@ -172,7 +169,6 @@ void USB_Device::callback(const usb_control_transfer *t, int result) {
               const usb_configuration_descriptor *cdesc = (const usb_configuration_descriptor*)t->getBuffer();
               if (t->getwLength() == sizeof(usb_configuration_descriptor)) {
                 // got the length, now get the entire thing
-                if (cdesc->iConfiguration) request_string(cdesc->iConfiguration);
                 control.Transfer(USB_REQTYPE_DEVICE_GET, USB_REQ_GET_DESCRIPTOR, t->getwValue(), 0, cdesc->wTotalLength, NULL, this);
                 return;
               } else {
@@ -191,7 +187,6 @@ void USB_Device::callback(const usb_control_transfer *t, int result) {
                     dprintf("Interface %d, Length %u:\n", idesc->bInterfaceNumber, l);
                     dprintf("\tbAlternateSetting %d\n\tbNumEndpoints %d\n\tbInterfaceClass %02X\n", idesc->bAlternateSetting, idesc->bNumEndpoints, idesc->bInterfaceClass);
                     dprintf("\tbInterfaceSubClass %02X\n\tbInterfaceProtocol %02X\n\tiInterface %d\n", idesc->bInterfaceSubClass, idesc->bInterfaceProtocol, idesc->iInterface);
-                    if (idesc->iInterface) request_string(idesc->iInterface);
                     for (uint8_t e=0; e < idesc->bNumEndpoints; e++) {
                       const usb_endpoint_descriptor *edesc = di->getEndpoint(e, alt);
                       dprintf("\t Endpoint %02X:\n", edesc->bEndpointAddress);
@@ -204,6 +199,8 @@ void USB_Device::callback(const usb_control_transfer *t, int result) {
               }
 
               if (configs.size() == ddesc.bNumConfigurations) {
+                // get string language descriptor
+                control.Transfer(USB_REQTYPE_DEVICE_GET, USB_REQ_GET_DESCRIPTOR, USB_DT_STRING << 8, 0, 255, NULL, this);
                 /* There may still be string requests pending and
                 * it would be cleaner to look-up drivers in a
                 * different function than this one, so punt this
@@ -247,6 +244,29 @@ void USB_Device::callback(const usb_control_transfer *t, int result) {
                   if (s->wLANGID[i] == USB_LANG) {
                     string_lang = USB_LANG;
                     dprintf("Device<%p> using language %04X for strings\n", this, string_lang);
+                    // retrieve possible device strings
+                    if (ddesc.iManufacturer) request_string(ddesc.iManufacturer);
+                    if (ddesc.iProduct) request_string(ddesc.iProduct);
+                    if (ddesc.iSerialNumber) request_string(ddesc.iSerialNumber);
+                    // check each configuration
+                    for (auto& conf : configs) {
+                      auto& c = conf.second;
+                      // retrieve possible configuration string
+                      if (c->getConfiguration()->iConfiguration)
+                        request_string(c->getConfiguration()->iConfiguration);
+                      for (unsigned int i=0; i < 255; i++) {
+                        auto iface = c->interface(i);
+                        if (iface == NULL) break;
+                        uint8_t alt = 0;
+                        while (1) {
+                          auto idesc = iface->getInterface(alt);
+                          if (idesc == NULL) break;
+                          // retrieve possible interface string (for all alt interfaces)
+                          if (idesc->iInterface) request_string(idesc->iInterface);
+                          ++alt;
+                        }
+                      }
+                    }
                     break;
                   }
                 }
@@ -360,8 +380,6 @@ void USB_Device::disconnect(void) {
 void USB_Device::USBMessage(const usb_msg_t& msg) {
   switch (msg.type) {
     case USB_MSG_DEVICE_INIT:
-      // request string descriptor zero (supported languages)
-      control.Transfer(USB_REQTYPE_DEVICE_GET, USB_REQ_GET_DESCRIPTOR, USB_DT_STRING << 8, 0, 255, NULL, this);
       // request device descriptor
       control.Transfer(USB_REQTYPE_DEVICE_GET, USB_REQ_GET_DESCRIPTOR, USB_DT_DEVICE << 8, 0, sizeof(ddesc), NULL, this);
       return;
@@ -413,11 +431,11 @@ void USB_Device::request_string(uint8_t string_id) {
 
 void USB_Device::search_for_drivers(void) {
   // try each Configuration
-  for (auto c=configs.begin(); c != configs.end(); c++) {
-    const usb_configuration_descriptor *config = (*c).second->getConfiguration();
+  for (auto& c : configs) {
+    const usb_configuration_descriptor *config = c.second->getConfiguration();
     USB_Driver *d = USB_Driver::Factory::find_driver(&ddesc, config, this);
     if (d != NULL) {
-      activate_configuration((*c).first);
+      activate_configuration(c.first);
       d->device = this;
       if (d->attach(&ddesc, config)) {
         drivers.push_back(d);
