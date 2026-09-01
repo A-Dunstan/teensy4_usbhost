@@ -447,9 +447,9 @@ int USB_Control_Endpoint::Transfer(uint8_t bmRequestType, uint8_t bmRequest, uin
     if (enqueue_transfer(msg) == true)
       return 0;
 
-    if (dyn_mem) free(buffer);
     delete msg;
   }
+  if (dyn_mem) free(buffer);
   return -1;
 }
 
