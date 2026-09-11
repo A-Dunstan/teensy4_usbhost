@@ -160,7 +160,7 @@ void FL2000::thread(void) {
       dbg_log("Interrupt arrived");
 
       threadMsg msg = {CMD_INTERRUPT};
-      if (workQueue.Put(-1, msg) != ATOM_OK) {
+      if (workQueue.Put(msg, -1) != ATOM_OK) {
         dbg_log("Failed to queue interrupt");
       }
     }
@@ -760,13 +760,13 @@ FLASHMEM USB_Driver* FL2000::offer(const usb_device_descriptor* d, const usb_con
 FLASHMEM bool FL2000::attach(const usb_device_descriptor *d, const usb_configuration_descriptor*) {
   dbg_log("ATTACH");
   threadMsg msg = {CMD_ATTACH};
-  return workQueue.Put(10, msg);
+  return workQueue.Put(msg, 10);
 }
 
 FLASHMEM void FL2000::detach(void) {
   dbg_log("DETACH");
   threadMsg msg = {CMD_DETACH};
-  workQueue.Put(10, msg);
+  workQueue.Put(msg, 10);
 }
 
 FLASHMEM FL2000::FL2000() {
@@ -1029,7 +1029,7 @@ void FL2000::convert_dma(slice_data* s, uint32_t height) {
         .len = slice_size
       }
     };
-    if (workQueue.Put(-1, msg) != ATOM_OK) {
+    if (workQueue.Put(msg, -1) != ATOM_OK) {
       dbg_log("Failed to send CMD_SEND_SLICE");
     }
   };
@@ -1802,7 +1802,7 @@ void FL2000::send_slice(slice_data *slice, size_t slice_len) {
             .s = slice
           }
         };
-        if (workQueue.Put(-1, msg) != ATOM_OK) {
+        if (workQueue.Put(msg, -1) != ATOM_OK) {
           dbg_log("Failed to send CMD_FRAME_DONE msg");
         }
       } else {
@@ -1824,7 +1824,7 @@ void FL2000::send_slice(slice_data *slice, size_t slice_len) {
               .s = slice
             }
           };
-          if (workQueue.Put(-1, msg) != ATOM_OK) {
+          if (workQueue.Put(msg, -1) != ATOM_OK) {
             dbg_log("Failed to send CMD_SLICE_DONE msg");
           }
         }

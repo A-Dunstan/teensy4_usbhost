@@ -44,7 +44,7 @@ uint32_t USBHostBase::getMillis(void) {
 }
 
 bool USBHostBase::getMessage(usb_msg_t &msg) {
-  uint8_t s = usbqueue.Get(0, msg);
+  uint8_t s = usbqueue.Get(msg);
   if (s != ATOM_OK)
     digitalWriteFast(LED_BUILTIN, HIGH);
   // release used timers now
@@ -54,7 +54,7 @@ bool USBHostBase::getMessage(usb_msg_t &msg) {
 }
 
 bool USBHostBase::putMessage(usb_msg_t &msg) {
-  if (usbqueue.Put(-1, msg) != ATOM_OK) {
+  if (usbqueue.Put(msg, -1) != ATOM_OK) {
     digitalWriteFast(LED_BUILTIN, HIGH);
     return false;
   }
@@ -74,7 +74,7 @@ bool USBHostBase::timerMsg(usb_msg_t &msg, uint32_t ms) {
 }
 
 void USBHostBase::TimerMsg::Callback() {
-  if (host.usbqueue.Put(-1, msg) == ATOM_WOULDBLOCK) {
+  if (host.usbqueue.Put(msg, -1) == ATOM_WOULDBLOCK) {
     // queue is full, reschedule to try again
     if (Register(1) == ATOM_OK)
       return;

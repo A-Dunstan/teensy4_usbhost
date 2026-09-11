@@ -83,9 +83,9 @@ class USB_Cam : public USB_Driver, public USB_Driver::Factory {
     current_frame.jpegbuf = NULL;
     current_frame.len = 0;
     // empty the transfer queue
-    while (transferq.Get(-1, t) == ATOM_OK);
+    while (transferq.Get(t, -1) == ATOM_OK);
     // empty the input queue
-    while (inputq.Get(-1, f) == ATOM_OK);
+    while (inputq.Get(f, -1) == ATOM_OK);
     free(sample_buf);
   }
 
@@ -93,7 +93,7 @@ class USB_Cam : public USB_Driver, public USB_Driver::Factory {
     auto iso_cb = [=, &lengths](int r) {
       const uint8_t *p = dst;
       if (current_frame.jpegbuf == NULL) {
-        if (inputq.Get(-1, current_frame) == ATOM_OK)
+        if (inputq.Get(current_frame, -1) == ATOM_OK)
           current_frame.len = -1; // wait for start of a new frame
       }
       for (int i=0; i < 8; i++, p+= wMaxPacketSize) {
@@ -116,10 +116,10 @@ class USB_Cam : public USB_Driver, public USB_Driver::Factory {
               current_frame.len = 0; // a new frame is starting - start collecting packets
             else {
               if (current_frame.jpegbuf) {
-                outputq.Put(-1, current_frame);
+                outputq.Put(current_frame, -1);
                 current_frame.jpegbuf = NULL;
               }
-              if (inputq.Get(-1, current_frame) == ATOM_OK)
+              if (inputq.Get(current_frame, -1) == ATOM_OK)
                 current_frame.len = 0;
             }
           }
@@ -132,7 +132,7 @@ class USB_Cam : public USB_Driver, public USB_Driver::Factory {
       }
       // otherwise put this transfer in the idle queue
       iso_transfer t = {dst, &lengths};
-      transferq.Put(-1, t);
+      transferq.Put(t, -1);
     };
 
     for (int i=0; i < 8; i++)
@@ -150,10 +150,10 @@ public:
   void submitBuffer(uint8_t *pic, int length) {
     if (attached) {
       jpeg_frame f = {pic, length};
-      if (inputq.Put(-1, f) == ATOM_OK) {
+      if (inputq.Put(f, -1) == ATOM_OK) {
         iso_transfer t;
         // start any/all idle transfers
-        while (transferq.Get(-1, t) == ATOM_OK) {
+        while (transferq.Get(t, -1) == ATOM_OK) {
           run_iso(t.sample, *t.length);
         }
       }
@@ -163,7 +163,7 @@ public:
   uint8_t* getBuffer(int &length) {
     if (attached) {
       jpeg_frame f;
-      if (outputq.Get(100, f) == ATOM_OK) {
+      if (outputq.Get(f, 100) == ATOM_OK) {
         if (f.jpegbuf) {
           length = f.len;
           return f.jpegbuf;

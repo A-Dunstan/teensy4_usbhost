@@ -21,6 +21,19 @@
 
 #include <cstdint>
 
+#define USB_PORT_FEATURE_CONNECTION     0
+#define USB_PORT_FEATURE_ENABLE         1
+#define USB_PORT_FEATURE_SUSPEND        2
+#define USB_PORT_FEATURE_OVER_CURRENT   3
+#define USB_PORT_FEATURE_RESET          4
+#define USB_PORT_FEATURE_POWER          8
+#define USB_PORT_FEATURE_LOW_SPEED      9
+#define USB_PORT_FEATURE_C_CONNECTION   16
+#define USB_PORT_FEATURE_C_ENABLE       17
+#define USB_PORT_FEATURE_C_PORT_SUSPEND 18
+#define USB_PORT_FEATURE_C_PORT_OVER_CURRENT 19
+#define USB_PORT_FEATURE_C_RESET        20
+
 class USB_Hub {
   friend class USB_Host;
 private:

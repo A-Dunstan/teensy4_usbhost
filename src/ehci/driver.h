@@ -22,7 +22,7 @@
 #include "types.h"
 
 class USB_Driver {
-  friend class USB_Device;
+  friend USB_Device;
 private:
   USB_Device* device = NULL;
   virtual void detach(void) = 0;
@@ -36,6 +36,10 @@ public:
     static class Factory* gList;
     class Factory* next = NULL;
 
+    friend USB_Device;
+    static USB_Driver* find_driver(const usb_device_descriptor*,const usb_configuration_descriptor*,const USB_Device*);
+    static USB_Driver* find_driver(const usb_interface_descriptor*,size_t,const USB_Device*);
+
   protected:
     Factory() { add(); }
     ~Factory() { remove(); }
@@ -46,9 +50,6 @@ public:
 
     virtual USB_Driver* offer(const usb_device_descriptor*,const usb_configuration_descriptor*,const USB_Device*) {return NULL;}
     virtual USB_Driver* offer(const usb_interface_descriptor*,size_t,const USB_Device*) {return NULL;}
-  public:
-    static USB_Driver* find_driver(const usb_device_descriptor*,const usb_configuration_descriptor*,const USB_Device*);
-    static USB_Driver* find_driver(const usb_interface_descriptor*,size_t,const USB_Device*);
   };
 
 

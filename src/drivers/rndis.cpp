@@ -55,7 +55,7 @@ const typename ccommand::response_t* USB_RNDIS::sendCommand(const ccommand& cmd,
     puts("Failed to queue command for sending\n");
     return NULL;
   }
-  if (cmd_signal.Wait(&mutex, CONTROL_TIMEOUT) != ATOM_OK) {
+  if (cmd_signal.Wait(mutex, CONTROL_TIMEOUT) != ATOM_OK) {
     puts("Failed to get command response signal");
     return NULL;
   }
@@ -101,7 +101,7 @@ void USB_RNDIS::control_in(int r) {
             .type = DRIVER_MSG_KEEPALIVE_REQUEST,
             .RequestID = resp_buf[2] // RequestID
           };
-          queue.Put(-1, keepalive_request);
+          queue.Put(keepalive_request, -1);
         } // else send indicate status to signal error?
         break;
       case RNDIS_MSG_INDICATE_STATUS:
@@ -482,14 +482,14 @@ bool USB_RNDIS::attach(const usb_device_descriptor*,const usb_configuration_desc
   driver_msg msg = {
     .type = DRIVER_MSG_ATTACH
   };
-  return queue.Put(1, msg) == ATOM_OK;
+  return queue.Put(msg, 1) == ATOM_OK;
 }
 
 void USB_RNDIS::detach(void) {
   driver_msg msg = {
     .type = DRIVER_MSG_DETACH
   };
-  queue.Put(1, msg);
+  queue.Put(msg, 1);
 }
 
 USB_RNDIS::USB_RNDIS(void) {

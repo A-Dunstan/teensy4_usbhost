@@ -96,7 +96,7 @@ void USBMouse::poll(int result) {
       if (result > 8) result = 8;
       memcpy(&event, report, result);
       event.len = (uint8_t)result;
-      queue->Put(1, event);
+      queue->Put(event, 1);
     }
     if (attached) InterruptMessage(ep_in, report_len, report, &poll_cb);
   }

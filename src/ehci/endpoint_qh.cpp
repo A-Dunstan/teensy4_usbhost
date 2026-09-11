@@ -241,9 +241,9 @@ void QH_Base::update(void) {
         t = &n;
       }
 
-      if (status & 0x20)
+      if (status & 0x20) // data buffer error (overrun or underrun)
         ret = -EOVERFLOW;
-      else if (status & 0x10)
+      else if (status & 0x10) // babble detected
         ret = -EPROTO;
 
       // unhalt the queue, resume processing

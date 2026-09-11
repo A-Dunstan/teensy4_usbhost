@@ -336,9 +336,9 @@ void USB_Device::deref(void) {
   // this performs a post-decrement so compare against 1
   if (refcount.fetch_sub(1) == 1) {
     // detach all drivers
-    for (auto drv=drivers.begin(); drv != drivers.end(); drv++) {
-      (*drv)->device = NULL;
-      (*drv)->detach();
+    for (auto drv : drivers) {
+      drv->device = NULL;
+      drv->detach();
     }
     usb_msg_t msg = {
       .type = USB_MSG_ADDRESS_RELEASED,
@@ -570,9 +570,8 @@ void USB_Device::activate_interface(uint8_t interface, int altsetting) {
   }
 
   // deactivate old endpoints
-  for (auto ep_it = to_remove.begin(); ep_it != to_remove.end(); ep_it++) {
-    const usb_endpoint_descriptor &ep = **ep_it;
-    size_t epi = (ep.bEndpointAddress & 0xF) + ((ep.bEndpointAddress & 0x80) ? 15 : 0);
+  for (auto ep : to_remove) {
+    size_t epi = (ep->bEndpointAddress & 0xF) + ((ep->bEndpointAddress & 0x80) ? 15 : 0);
     deactivate_endpoint(epi-1);
   }
 
@@ -583,8 +582,8 @@ void USB_Device::activate_interface(uint8_t interface, int altsetting) {
   // set the new interface
   control.Transfer(USB_REQTYPE_INTERFACE_SET, USB_REQ_SET_INTERFACE, altsetting, interface, 0, NULL, this);
   // activate new endpoints
-  for (auto ep_it = to_add.begin(); ep_it != to_add.end(); ep_it++) {
-    activate_endpoint(*ep_it);
+  for (auto ep : to_add) {
+    activate_endpoint(ep);
   }
 }
 

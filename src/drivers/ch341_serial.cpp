@@ -17,7 +17,6 @@
 */
 
 #include "../teensy4_usbhost.h"
-#include <cstdio>
 
 using namespace ch341;
 
@@ -92,7 +91,7 @@ using namespace ch341;
 
 serial::operator bool() {
   bool ret = false;
-  if (started) {
+  if (state & STATE_STARTED) {
     if (!hw_flow || (status & CH341_STATUS_DSR))
       ret = true;
   }
@@ -144,10 +143,7 @@ void serial::calculate_baud(uint32_t baud) {
   factor = (unsigned char)a;
   divisor = b;
 
-  uint32_t max_out = baud / 1000;
-  if (max_out == 0) tx_max = 1;
-  else if (max_out >= sizeof(data_out[0])) tx_max = sizeof(data_out[0]);
-  else tx_max = max_out;
+  tx_wmark = std::max(1u, std::min(ep_out_len, (size_t)baud/1000));
 }
 
 void serial::uart_mode(uint32_t mode) {
@@ -184,10 +180,11 @@ void serial::status_callback(int result) {
     // compare new vs. old status, act on changes...
 //    dprintf("CH341 line status %02X (%02X)\n", new_status, status);
     status = new_status;
+    status_change(status & CH341_STATUS_CTS, status & CH341_STATUS_DSR, status & CH341_STATUS_RI, status & CH341_STATUS_DCD);
   }
 
   if (status_in[0] & CH341_STATUSTYPE_OVERFLOW) {
-    dprintf("CH341: input overrun (%u %p %p)\n", read_buf.available(), rx_buf[0], rx_buf[1]);
+    dprintf("CH341: input overrun\n");
   }
 
   if (status_in[0] & CH341_STATUSTYPE_ERROR) {
@@ -202,36 +199,7 @@ void serial::status_callback(int result) {
 }
 
 void serial::get_status(void) {
-  if (attached) {
-    InterruptMessage(ep_status, sizeof(status_in), status_in, &status_cb);
-  }
-}
-
-void serial::read_callback(int result, uint8_t *buf) {
-  auto lock = rx_lock.Lock(10);
-  if (lock) {
-    if (result >= 0) {
-      read_buf.write(buf, (size_t)result);
-    }
-    lock.Unlock();
-  }
-  if (result != -ENXIO)
-    queue_read(buf);
-}
-
-void serial::queue_read(uint8_t *buf) {
-  auto lock = rx_lock.Lock(1);
-  if (lock) {
-    uint32_t to_read = (uint32_t)read_buf.availableForWrite();
-    if (started && to_read) {
-      USBCallback fn( [=](int r) {read_callback(r, buf);} );
-      if (to_read > sizeof(data_in[0])) to_read = sizeof(data_in[0]);
-      if (BulkMessage(ep_in, to_read, buf, fn) >= 0)
-        return;
-    }
-    if (rx_buf[0] == NULL) rx_buf[0] = buf;
-    else rx_buf[1] = buf;
-  }
+  InterruptMessage(ep_status, sizeof(status_in), status_in, &status_cb);
 }
 
 void serial::dtr_rts_callback(int result, uint8_t old_status, uint8_t new_status) {
@@ -250,7 +218,7 @@ void serial::dtr_rts_callback(int result, uint8_t old_status, uint8_t new_status
 void serial::set_dtr_rts(uint8_t new_status) {
   new_status &= CH341_STATUS_DTR|CH341_STATUS_RTS;
   if (hw_flow) new_status |= CH341_STATUS_RTS;
-  if (attached && new_status != out_status) {
+  if (getDevice()!=NULL && new_status!=out_status) {
     USBCallback fn( [=](int r) { dtr_rts_callback(r, out_status, new_status);} );
     if (ControlMessage(CH341_CONTROL_OUT, CH341_REQ_MODEM_CTRL, ~new_status, 0, fn) >= 0)
       out_status = new_status;
@@ -258,29 +226,15 @@ void serial::set_dtr_rts(uint8_t new_status) {
 }
 
 void serial::start(void) {
-  auto txlock = tx_lock.Lock(1);
-  auto rxlock = rx_lock.Lock(1);
-  if (rxlock) {
-    if (hw_flow) set_dtr_rts(CH341_STATUS_DTR|CH341_STATUS_RTS);
-    if (!started) {
-      started = true;
-      read_buf.flush();
-      if (rx_buf[1]) {
-        uint8_t *b = rx_buf[1];
-        rx_buf[1] = NULL;
-        queue_read(b);
-      }
-      if (rx_buf[0]) {
-        uint8_t *b = rx_buf[0];
-        rx_buf[0] = NULL;
-        queue_read(b);
-      }
-    }
-  }
+  if (state & STATE_STARTED) return;
+
+  if (hw_flow) set_dtr_rts(CH341_STATUS_DTR|CH341_STATUS_RTS);
+
+  usbserial_base::start();
 }
 
 void serial::init(int result, unsigned int stage) {
-  dprintf("ch341::serial::init stage %u result %d\n", stage, result);
+//  dprintf("ch341::serial::init stage %u result %d\n", stage, result);
   USBCallback fn( [=,nextstage=stage+1](int r) { init(r, nextstage);} );
 
   if (result < 0) return;
@@ -320,24 +274,7 @@ void serial::init(int result, unsigned int stage) {
   }
 }
 
-void serial::send_timer_expired(EventResponder& e) {
-  auto p = (serial*)e.getContext();
-  p->flush();
-}
-
 serial::serial() {
-  event_timer.setContext(this);
-  event_timer.attach(send_timer_expired);
-
-  tx_buf[0] = data_out[0];
-  tx_buf[1] = data_out[1];
-  tx_length = 0;
-  tx_max = sizeof(data_out[0]);
-
-  rx_buf[0] = rx_buf[1] = NULL;
-
-  attached = false;
-  started = false;
   calculate_baud(CH341_DEFAULT_BAUD);
   uart_mode(SERIAL_8N1);
   hw_flow = true;
@@ -345,22 +282,12 @@ serial::serial() {
 }
 
 serial::~serial() {
-  if (attached) {
-    detach();
-    started = false;
-    attached = false;
-  }
-
-  event_timer.detach();
+  detach();
 }
 
 void serial::detach(void) {
-  auto tx = tx_lock.Lock(10);
-  auto rx = rx_lock.Lock(10);
-  sendTimer.end();
-  started = false;
-  attached = false;
   status = 0;
+  end();
 
   dprintf("ch341::serial Detached\n");
 }
@@ -383,14 +310,16 @@ USB_Driver* serial::offer(const usb_device_descriptor* d,const usb_configuration
       while (b[1] != USB_DT_ENDPOINT) b += b[0];
       const usb_endpoint_descriptor *e = (const usb_endpoint_descriptor*)b;
       b += b[0];
-      if (e->bmAttributes == USB_ENDPOINT_BULK && e->wMaxPacketSize == 32) {
+      if (e->bmAttributes == USB_ENDPOINT_BULK) {
         if (e->bEndpointAddress & 0x80) {
           if (ep_in == 0) {
             ep_in = e->bEndpointAddress;
+            ep_in_len = e->wMaxPacketSize;
             endpoints++;
           }
         } else if (ep_out == 0) {
           ep_out = e->bEndpointAddress;
+          ep_out_len = e->wMaxPacketSize;
           endpoints++;
         }
       } else if (e->bmAttributes == USB_ENDPOINT_INTERRUPT && e->wMaxPacketSize >= 4) {
@@ -415,12 +344,11 @@ bool serial::attach(const usb_device_descriptor*,const usb_configuration_descrip
     out_status = 0;
     lock.Unlock();
   }
-  started = false;
+
+  usbserial_base::end();
+
   status = 0;
   init(0, 0);
-  attached = true;
-  queue_read(data_in[0]);
-  queue_read(data_in[1]);
 
   dprintf("ch341::serial Attached (%p)\n", this);
   return true;
@@ -432,11 +360,12 @@ void serial::begin(uint32_t baud, uint16_t format, bool rts_cts) {
   uint8_t oldlcr = lcr;
   bool flow = hw_flow;
 
+  end();
   calculate_baud(baud);
   uart_mode(format);
   hw_flow = rts_cts;
 
-  if (!attached) return;
+  if (getDevice() == NULL) return;
 
   if (oldfactor != factor || olddivisor != divisor || oldlcr != lcr) {
     ControlMessage(CH341_CONTROL_OUT, CH341_REQ_SERIAL_INIT, (lcr<<8)|0xC09C, (factor<<8)|divisor|0x80);
@@ -444,138 +373,20 @@ void serial::begin(uint32_t baud, uint16_t format, bool rts_cts) {
   if (flow != hw_flow) {
     ControlMessage(CH341_CONTROL_OUT, CH341_REQ_WRITE_2REG, (CH341_REG_FLOW_CONTROL<<8)|CH341_REG_FLOW_CONTROL, hw_flow ? 0x0101:0);
   }
-
-  start();
 }
 
 void serial::end() {
-  started = false;
+  usbserial_base::end();
+
   auto lock = rx_lock.Lock(1);
   if (lock) {
     set_dtr_rts(0);
   }
 }
 
-int serial::available() {
-  int ret = 0;
-  auto lock = rx_lock.Lock(1);
-  if (lock) {
-    size_t s = read_buf.available();
-    if (s) ret = (int)s;
-  }
-  return ret;
-}
-
-int serial::peek() {
-  int ret = -1;
-  auto lock = rx_lock.Lock(1);
-  if (lock) {
-    if (read_buf.available() > 0) {
-      ret = *read_buf.peek();
-    }
-  }
-  return ret;
-}
-
-int serial::read() {
-  int ret = -1;
-  auto lock = rx_lock.Lock(1);
-  if (lock) {
-    if (read_buf.available() > 0) {
-      uint8_t c;
-      read_buf.read(&c, 1);
-      ret = c;
-      // there is now at least some space in the circular buffer,
-      // so queue pending rx transfers
-      if (rx_buf[0]) {
-        uint8_t *buf = rx_buf[0];
-        rx_buf[0] = rx_buf[1];
-        rx_buf[1] = NULL;
-        queue_read(buf);
-      }
-    }
-  }
-  return ret;
-}
-
-int serial::availableForWrite() {
-  int ret=0;
-  auto lock = tx_lock.Lock(1);
-  if (lock) {
-    if (started && (!hw_flow || (status & CH341_STATUS_CTS))) {
-      if (tx_buf[0] && tx_length < tx_max) {
-        ret = (int)(tx_max - tx_length);
-      }
-    }
-  }
-  return ret;
-}
-
-size_t serial::write(uint8_t c) {
-  size_t ret = 0;
-  auto lock = tx_lock.Lock(1);
-  if (lock) {
-    if (started) {
-      if (tx_buf[0] == NULL) {
-        if (tx_signal.Wait(&tx_lock, 50) != ATOM_OK) {
-          dprintf("Failed to get TX signal\n");
-        }
-      }
-      if (tx_buf[0] && tx_length < sizeof(data_out[0])) {
-        tx_buf[0][tx_length++] = c;
-        ret = 1;
-        // maybe start the timer to send later
-        if (tx_length < tx_max)
-          sendTimer.begin(1, event_timer);
-        // else send now
-        else
-          flush();
-      }
-    }
-  }
-  else dprintf("Failed to get tx_lock\n");
-  return ret;
-}
-
-void serial::write_callback(int result, uint8_t *buf) {
-  if (result < 0) dprintf("write failed: %d\n", result);
-  // don't care about the result - buffer is now free, recycle it
-  auto lock = tx_lock.Lock(1);
-  if (lock) {
-    if (tx_buf[0] == NULL) { // use it immediately
-      tx_buf[0] = buf;
-      tx_length = 0;
-    }
-    else { // queue it for later use
-      tx_buf[1] = buf;
-    }
-    tx_signal.Signal();
-  }
-}
-
-void serial::flush(void) {
-  auto lock = tx_lock.Lock(10);
-  if (lock) {
-    if (started) {
-      sendTimer.end();
-      if (tx_buf[0] && tx_length>0) {
-        USBCallback fn( [=,buf=tx_buf[0]] (int r) {write_callback(r, buf);} );
-        if (BulkMessage(ep_out, tx_length, tx_buf[0], fn) < 0) {
-          // failed to send - nothing we can do now, buffer will be discarded
-          dprintf("Failed to flush CH341 output buffer\n");
-        } else {
-          tx_buf[0] = tx_buf[1];
-          tx_buf[1] = NULL;
-        }
-        tx_length = tx_buf[0] ? 0 : tx_max;
-      }
-    }
-  }
-}
-
 void serial::set_dtr_rts(bool dtr, bool rts) {
   auto lock = rx_lock.Lock(1);
-  if (lock && attached) {
+  if (lock && getDevice()) {
     uint8_t s = (rts ? CH341_STATUS_RTS : 0);
     s |= (dtr ? CH341_STATUS_DTR : 0);
     set_dtr_rts(s);
@@ -596,54 +407,4 @@ void serial::set_rts(bool set) {
   if (lock) {
     set_dtr_rts((out_status & ~CH341_STATUS_RTS) | (set ? CH341_STATUS_RTS : 0));
   }
-}
-
-template<size_t length>
-circ_buf<length>::circ_buf() {
-  flush();
-}
-
-template<size_t length>
-size_t circ_buf<length>::read(uint8_t *dst, size_t len) {
-  if (len > available()) len = available();
-  size_t to_copy = len;
-  if ((head + to_copy) >= (buf + length)) {
-    to_copy = buf + length - head;
-    memcpy(dst, head, to_copy);
-    dst += to_copy;
-    head = buf;
-    if (to_copy == len)
-      goto end;
-    to_copy = len - to_copy;
-  }
-  memcpy(dst, head, to_copy);
-  head += to_copy;
-end:
-  avail += len;
-  return len;
-}
-
-template<size_t length>
-void circ_buf<length>::write(const uint8_t *src, size_t len) {
-  if (len > availableForWrite()) len = availableForWrite();
-  size_t to_copy = len;
-  if ((tail + to_copy) >= (buf + length)) {
-    to_copy = buf + length - tail;
-    memcpy(tail, src, to_copy);
-    src += to_copy;
-    tail = buf;
-    if (to_copy == len)
-      goto end;
-    to_copy = len - to_copy;
-  }
-  memcpy(tail, src, to_copy);
-  tail += to_copy;
-end:
-  avail -= len;
-}
-
-template <size_t length>
-void circ_buf<length>::flush(void) {
-  head = tail = buf;
-  avail = length;
 }

@@ -20,6 +20,7 @@
 #define _TEENSY4_USBHOST_DRIVERS_H
 
 #include "ch341_serial.h"
+#include "cdc_acm.h"
 #include "mass_storage_fat.h"
 #include "mass_storage.h"
 #include "mouse.h"

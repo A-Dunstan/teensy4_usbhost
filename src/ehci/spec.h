@@ -71,17 +71,24 @@
 #define USB_ENDPOINT_BULK                2
 #define USB_ENDPOINT_INTERRUPT           3
 
-typedef struct {
+struct usb_control_setup {
   uint8_t bmRequestType;
   uint8_t bmRequest;
   uint16_t wValue;
   uint16_t wIndex;
   uint16_t wLength;
-} usb_control_setup;
+};
 
-typedef struct {
+struct usb_descriptor {
   uint8_t bLength;
   uint8_t bDescriptorType;
+  const usb_descriptor* next(void) const {
+    return (const usb_descriptor*)(&bLength + bLength);
+  };
+};
+
+struct usb_device_descriptor : usb_descriptor {
+  enum { DescriptorType = USB_DT_DEVICE };
   uint16_t bcdUSB;
   uint8_t bDeviceClass;
   uint8_t bDeviceSubClass;
@@ -94,33 +101,30 @@ typedef struct {
   uint8_t iProduct;
   uint8_t iSerialNumber;
   uint8_t bNumConfigurations;
-} usb_device_descriptor;
+};
 
-typedef struct {
-  uint8_t bLength;
-  uint8_t bDescriptorType;
+struct usb_string_descriptor : usb_descriptor {
+  enum { DescriptorType = USB_DT_STRING };
   union {
     uint16_t wLANGID[0];
     char16_t bString[0];
   };
-} usb_string_descriptor;
+};
 
 // these descriptors may occur unaligned so are all declared as packed
 
-typedef struct {
-  uint8_t bLength;
-  uint8_t bDescriptorType;
+struct usb_configuration_descriptor : usb_descriptor {
+  enum { DescriptorType = USB_DT_CONFIGURATION };
   uint16_t wTotalLength;
   uint8_t bNumInterfaces;
   uint8_t bConfigurationValue;
   uint8_t iConfiguration;
   uint8_t bmAttributes;
   uint8_t bMaxPower;
-} __attribute__((packed)) usb_configuration_descriptor;
+} __attribute__((packed));
 
-typedef struct {
-  uint8_t bLength;
-  uint8_t bDescriptorType;
+struct usb_interface_descriptor : usb_descriptor {
+  enum { DescriptorType = USB_DT_INTERFACE };
   uint8_t bInterfaceNumber;
   uint8_t bAlternateSetting;
   uint8_t bNumEndpoints;
@@ -128,44 +132,28 @@ typedef struct {
   uint8_t bInterfaceSubClass;
   uint8_t bInterfaceProtocol;
   uint8_t iInterface;
-} __attribute__((packed)) usb_interface_descriptor;
+} __attribute__((packed));
 
-typedef struct {
-  uint8_t bLength;
-  uint8_t bDescriptorType;
+struct usb_endpoint_descriptor : usb_descriptor {
+  enum { DescriptorType = USB_DT_ENDPOINT };
   uint8_t bEndpointAddress;
   uint8_t bmAttributes;
   uint16_t wMaxPacketSize;
   uint8_t bInterval;
-} __attribute__((packed)) usb_endpoint_descriptor;
+} __attribute__((packed));
 
-typedef struct {
-  uint8_t bLength;
-  uint8_t bDescriptorType;
+struct usb_interface_association_descriptor : usb_descriptor {
+  enum { DescriptorType = USB_DT_INTERFACE_ASSOCIATION };
   uint8_t bFirstInterface;
   uint8_t bInterfaceCount;
   uint8_t bFunctionClass;
   uint8_t bFunctionSubClass;
   uint8_t bFunctionProtocol;
   uint8_t iFunction;
-} usb_interface_association_descriptor;
+};
 
-#define USB_PORT_FEATURE_CONNECTION     0
-#define USB_PORT_FEATURE_ENABLE         1
-#define USB_PORT_FEATURE_SUSPEND        2
-#define USB_PORT_FEATURE_OVER_CURRENT   3
-#define USB_PORT_FEATURE_RESET          4
-#define USB_PORT_FEATURE_POWER          8
-#define USB_PORT_FEATURE_LOW_SPEED      9
-#define USB_PORT_FEATURE_C_CONNECTION   16
-#define USB_PORT_FEATURE_C_ENABLE       17
-#define USB_PORT_FEATURE_C_PORT_SUSPEND 18
-#define USB_PORT_FEATURE_C_PORT_OVER_CURRENT 19
-#define USB_PORT_FEATURE_C_RESET        20
-
-typedef struct {
-  uint8_t bLength;
-  uint8_t bDescriptorType;
+struct usb_hub_descriptor : usb_descriptor {
+  enum { DescriptorType = USB_DT_HUB };
   uint8_t bNbrPorts;
   uint16_t wHubCharacteristics;
   uint8_t bPwrOn2PwrGood;
@@ -173,6 +161,6 @@ typedef struct {
   // technically this is an array but in practice
   // nothing supports more than 7 ports
   uint8_t DeviceRemovable;
-} __attribute__((packed)) usb_hub_descriptor;
+} __attribute__((packed));
 
 #endif // _USB_SPEC_H

@@ -25,7 +25,7 @@ void loop() {
     digitalWriteFast(LED_BUILTIN, HIGH);
     mouse_event ev;
     // wait (10 systicks) for an event
-    if (mouse_queue.Get(10, ev) == ATOM_OK) {
+    if (mouse_queue.Get(ev, 10) == ATOM_OK) {
       Serial.print("Mouse Event(");
       Serial.print(ev.len);
       Serial.print("): Buttons ");

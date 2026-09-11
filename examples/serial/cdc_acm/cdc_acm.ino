@@ -1,7 +1,7 @@
 #include <teensy4_usbhost.h>
 
 DMAMEM static TeensyUSBHost2 usb;
-DMAMEM static ch341::serial USBSerial;
+DMAMEM static cdc_acm USBSerial;
 
 uint32_t count, prior_count;
 uint32_t prior_msec;
@@ -18,8 +18,6 @@ void setup() {
   USBSerial.begin(115200);
   while (!USBSerial);
 
-  Serial.println("USBSerial is ready");
-
   count = 10000000;
   prior_count = count;
   count_per_second = 0;
@@ -28,7 +26,7 @@ void setup() {
 
 void loop() {
   if (!USBSerial) return;
-
+  
   int r=0;
   USBSerial.printf("count=%u, chars/sec=%u\n%n", count, count_per_second, &r);
   count += r;
