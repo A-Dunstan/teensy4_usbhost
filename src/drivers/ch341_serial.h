@@ -69,6 +69,10 @@ public:
   void set_dtr(bool set);
   void set_rts(bool set);
   virtual void status_change(bool cts, bool dsr, bool ring, bool connect) {}
+  bool cts(void) const;
+  bool dsr(void) const;
+  bool ri(void) const;
+  bool cd(void) const;
 
   operator bool() override;
   void begin(uint32_t baud, uint16_t format, bool rts_cts);

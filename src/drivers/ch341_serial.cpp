@@ -408,3 +408,8 @@ void serial::set_rts(bool set) {
     set_dtr_rts((out_status & ~CH341_STATUS_RTS) | (set ? CH341_STATUS_RTS : 0));
   }
 }
+
+bool serial::cts(void) const { return status & CH341_STATUS_CTS; }
+bool serial::dsr(void) const { return status & CH341_STATUS_DSR; }
+bool serial::ri(void) const  { return status & CH341_STATUS_RI;  }
+bool serial::cd(void) const  { return status & CH341_STATUS_DCD; }
