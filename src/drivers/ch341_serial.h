@@ -28,9 +28,8 @@
 
 namespace ch341 {
 
-class serial : public USB_Driver::Factory, public usbserial_base {
+class serial : public USB_Driver::Factory, virtual public usbserial_base {
 private:
-
   uint8_t status_in[8] __attribute__((aligned(32)));
 
   uint16_t version;
@@ -57,6 +56,7 @@ private:
   void dtr_rts_callback(int,uint8_t,uint8_t);
   void set_dtr_rts(uint8_t); // should be called under rx_lock
 
+protected:
   void detach(void) override;
   USB_Driver* offer(const usb_device_descriptor*,const usb_configuration_descriptor*,const USB_Device*) override;
   bool attach(const usb_device_descriptor*,const usb_configuration_descriptor*) override;
@@ -77,7 +77,6 @@ public:
   operator bool() override;
   void begin(uint32_t baud, uint16_t format, bool rts_cts);
   void begin(uint32_t baud, uint16_t format=SERIAL_8N1) override {begin(baud,format,true);}
-  void end() override;
 };
 
 } // namespace ch341

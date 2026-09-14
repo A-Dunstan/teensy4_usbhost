@@ -21,7 +21,7 @@
 
 #include "serial.h"
 
-class cdc_acm : public USB_Driver::Factory, public usbserial_base {
+class cdc_acm : public USB_Driver::Factory, virtual public usbserial_base {
   struct line_coding_t {
     uint8_t dwDTERate[4];
     uint8_t bCharFormat;
@@ -50,6 +50,7 @@ class cdc_acm : public USB_Driver::Factory, public usbserial_base {
 
   void init(int result, unsigned int stage);
 
+protected:
   void detach(void) override;
   USB_Driver* offer(const usb_interface_descriptor* id, size_t length, const USB_Device* d) override;
   bool attach(const usb_interface_descriptor* id, size_t length) override;

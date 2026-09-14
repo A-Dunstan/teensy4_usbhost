@@ -345,8 +345,6 @@ bool serial::attach(const usb_device_descriptor*,const usb_configuration_descrip
     lock.Unlock();
   }
 
-  usbserial_base::end();
-
   status = 0;
   init(0, 0);
 
@@ -360,7 +358,6 @@ void serial::begin(uint32_t baud, uint16_t format, bool rts_cts) {
   uint8_t oldlcr = lcr;
   bool flow = hw_flow;
 
-  end();
   calculate_baud(baud);
   uart_mode(format);
   hw_flow = rts_cts;
@@ -372,15 +369,6 @@ void serial::begin(uint32_t baud, uint16_t format, bool rts_cts) {
   }
   if (flow != hw_flow) {
     ControlMessage(CH341_CONTROL_OUT, CH341_REQ_WRITE_2REG, (CH341_REG_FLOW_CONTROL<<8)|CH341_REG_FLOW_CONTROL, hw_flow ? 0x0101:0);
-  }
-}
-
-void serial::end() {
-  usbserial_base::end();
-
-  auto lock = rx_lock.Lock(1);
-  if (lock) {
-    set_dtr_rts(0);
   }
 }
 
