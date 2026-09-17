@@ -125,11 +125,9 @@ int USB_Driver::BulkMessage(uint8_t bEndpoint, uint32_t dLength, void *data, con
     }
   };
   if (device == NULL) errno = ENOENT;
-  else {
-    if (device->pushMessage(msg))
-      return 0;
-    errno = ENOMEM;
-  }
+  else if (device->pushMessage(msg) == false) errno = ENOMEM;
+  else return 0;
+
   return -1;
 }
 
@@ -145,11 +143,9 @@ int USB_Driver::BulkMessage(uint8_t bEndpoint, const usb_bulkintr_sg* sg, const 
     }
   };
   if (device == NULL) errno = ENOENT;
-  else {
-    if (device->pushMessage(msg))
-      return 0;
-    errno = ENOMEM;
-  }
+  else if (device->pushMessage(msg) == false) errno = ENOMEM;
+  else return 0;
+
   return -1;
 }
 
@@ -174,11 +170,9 @@ int USB_Driver::InterruptMessage(uint8_t bEndpoint, uint16_t wLength, void *data
     }
   };
   if (device == NULL) errno = ENOENT;
-  else {
-    if (device->pushMessage(msg))
-      return 0;
-    errno = ENOMEM;
-  }
+  else if (device->pushMessage(msg) == false) errno = ENOMEM;
+  else return 0;
+
   return -1;
 }
 
@@ -204,28 +198,39 @@ int USB_Driver::IsochronousMessage(uint8_t bEndpoint, isolength& Lengths, void *
   };
   if (device == NULL) errno = ENOENT;
   else if (Lengths[0] == 0) errno = EINVAL;
-  else {
-    if (device->pushMessage(msg))
-      return 0;
-    errno = ENOMEM;
-  }
+  else if (device->pushMessage(msg) == false) errno = ENOMEM;
+  else return 0;
+
   return -1;
 }
 
-template <class req_fn>
-static int MessageWrapper(USBCallback& user_cb, const req_fn& req) {
+int USB_Driver::Timer(uint32_t ms, const std::function<void()>* timer_cb) {
+  usb_msg_t msg = {
+    .type = USB_MSG_DEVICE_TIMER,
+    .device = {
+      .timer_cb = timer_cb
+    }
+  };
+  if (device == NULL) errno = ENOENT;
+  else if (timer_cb == NULL) errno = EINVAL;
+  else if (device->pushMessage(msg, ms) == false) errno = ENOMEM;
+  else return 0;
+
+  return -1;
+}
+
+template <class R, class... Args, class req_fn>
+static int MessageWrapper(std::function<R(Args...)>& user_cb, const req_fn& req) {
   int ret = -1;
-  USBCallback* cb = new(std::nothrow) USBCallback;
-  if (cb == NULL) {
-    errno = ENOMEM;
-  } else {
-    *cb = [=,orig_cb(std::move(user_cb))](int r) {
-      orig_cb(r);
+  auto cb = new(std::nothrow) std::function<R(Args...)>;
+  if (cb == NULL) errno = ENOMEM;
+  else {
+    *cb = [=,orig_cb(std::move(user_cb))](Args... r) {
+      orig_cb(r...);
       delete cb;
     };
     ret = req(cb);
-    if (ret < 0)
-      delete cb;
+    if (ret < 0) delete cb;
   }
   return ret;
 }
@@ -281,6 +286,12 @@ int USB_Driver::IsochronousMessage(uint8_t bEndpoint, isolength& Lengths, void *
 int USB_Driver::BulkMessage(uint8_t bEndpoint, const usb_bulkintr_sg* sg, USBCallback cb_func) {
   return MessageWrapper(cb_func, [&](const USBCallback* cb)->int {
     return BulkMessage(bEndpoint, sg, cb);
+  });
+}
+
+int USB_Driver::Timer(uint32_t ms, std::function<void()> cb_func) {
+  return MessageWrapper(cb_func, [&](std::function<void()>* cb)->int {
+    return Timer(ms, cb);
   });
 }
 

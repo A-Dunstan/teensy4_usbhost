@@ -128,6 +128,7 @@ typedef enum {
   USB_MSG_DEVICE_INIT = 0x300,
   USB_MSG_DEVICE_ENDPOINT_REMOVED,
   USB_MSG_DEVICE_FIND_DRIVER,
+  USB_MSG_DEVICE_TIMER,
   USB_MSG_DEVICE_CONTROL_TRANSFER,
   USB_MSG_DEVICE_BULK_TRANSFER,
   USB_MSG_DEVICE_INTERRUPT_TRANSFER,
@@ -157,6 +158,7 @@ typedef struct {
       union {
         const USBCallback* cb;
         CCallback<usb_control_transfer>* control_cb;
+        const std::function<void()>* timer_cb;
       };
       union {
         class USB_Endpoint *endpoint;

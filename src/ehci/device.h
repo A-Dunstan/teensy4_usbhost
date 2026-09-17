@@ -84,7 +84,7 @@ private:
   void BulkTransfer(uint8_t bEndpoint, const usb_bulkintr_sg* sg, const USBCallback* cb);
 
 public:
-  bool pushMessage(usb_msg_t&);
+  bool pushMessage(usb_msg_t&, uint32_t delay=0);
   uint8_t getSpeed(void) const { return speed; }
   uint8_t getAddress(void) const { return address; }
   uint8_t getHubAddr(void) const { return hub_addr; }

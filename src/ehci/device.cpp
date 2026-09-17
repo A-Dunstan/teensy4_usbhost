@@ -208,21 +208,8 @@ void USB_Device::callback(const usb_control_transfer *t, int result) {
                 */
                 usb_msg_t msg = {
                   .type = USB_MSG_DEVICE_FIND_DRIVER,
-                  .device = {
-                   .dev = this
-                  }
                 };
-                /* delayed message is the "safe" way, but if it
-                * fails just put the message directly on the host queue.
-                */
-                refcount.fetch_add(1);
-                if (host.timerMsg(msg, 10) == false) {
-                  if (host.putMessage(msg) == false) {
-                    // have to give up, driver won't be hooked and
-                    // configuration/interfaces won't be activated
-                    deref();
-                  }
-                }
+                pushMessage(msg, 10);
               }
               return;
             }
@@ -411,6 +398,10 @@ void USB_Device::USBMessage(const usb_msg_t& msg) {
       break;
     case USB_MSG_DEVICE_BULK_SG_TRANSFER:
       BulkTransfer(msg.device.bulkintr.bEndpoint, msg.device.bulkintr.sg, msg.device.cb);
+      deref();
+      break;
+    case USB_MSG_DEVICE_TIMER:
+      (*msg.device.timer_cb)();
       deref();
       break;
     default:
@@ -776,7 +767,7 @@ void USB_Device::ControlTransfer(uint8_t bmRequestType, uint8_t bmRequest, uint1
   }
 }
 
-bool USB_Device::pushMessage(usb_msg_t& msg) {
+bool USB_Device::pushMessage(usb_msg_t& msg, uint32_t delay) {
   switch (msg.type) {
     case USB_MSG_DEVICE_CONTROL_TRANSFER:
       if (prepare_control_transfer(msg) == false)
@@ -785,12 +776,23 @@ bool USB_Device::pushMessage(usb_msg_t& msg) {
     case USB_MSG_DEVICE_INTERRUPT_TRANSFER:
     case USB_MSG_DEVICE_ISOCHRONOUS_TRANSFER:
     case USB_MSG_DEVICE_BULK_SG_TRANSFER:
+    case USB_MSG_DEVICE_FIND_DRIVER:
+    case USB_MSG_DEVICE_TIMER:
       msg.device.dev = this;
-      refcount.fetch_add(1);
-    default:
       break;
+    default:
+      dprintf("USB_Device: Unknown message type: %d\n", msg.type);
+      return false;
   }
-  return host.putMessage(msg);
+  refcount.fetch_add(1);
+
+  if (delay && host.timerMsg(msg, delay))
+    return true;
+  if (host.putMessage(msg))
+    return true;
+
+  deref();
+  return false;
 }
 
 uint8_t validate_descriptor(const uint8_t* &desc, const uint8_t* const end) {

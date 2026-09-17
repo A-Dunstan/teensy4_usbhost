@@ -742,6 +742,7 @@ void USB_Host::usb_process(void) {
       case USB_MSG_DEVICE_INTERRUPT_TRANSFER:
       case USB_MSG_DEVICE_ISOCHRONOUS_TRANSFER:
       case USB_MSG_DEVICE_BULK_SG_TRANSFER:
+      case USB_MSG_DEVICE_TIMER:
         // forward to device
         msg.device.dev->USBMessage(msg);
         continue;
