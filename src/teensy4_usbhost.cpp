@@ -337,3 +337,9 @@ int USB_Driver::IsochronousMessage(uint8_t bEndpoint, isolength& Lengths, void *
     return IsochronousMessage(bEndpoint, Lengths, data, cb);
   });
 }
+
+int USB_Driver::BulkMessage(uint8_t bEndpoint, const usb_bulkintr_sg* sg) {
+  return sync_message(getDevice(), [&](const USBCallback* cb)->int {
+    return BulkMessage(bEndpoint, sg, cb);
+  });
+}

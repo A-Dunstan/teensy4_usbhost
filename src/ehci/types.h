@@ -136,10 +136,10 @@ typedef enum {
   USB_MSG_DEVICE_BULK_SG_TRANSFER,
 } usb_msg_type_t;
 
-typedef struct {
-  void* data;
-  uint16_t wLength;
-} usb_bulkintr_sg;
+struct usb_bulkintr_sg {
+  void* data = NULL;
+  uint16_t wLength = 0;
+};
 
 typedef struct {
   usb_msg_type_t type;

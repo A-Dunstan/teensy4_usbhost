@@ -103,6 +103,7 @@ protected:
   int InterruptMessage(uint8_t bEndpoint, uint16_t wLength, void *data);
   int IsochronousMessage(uint8_t bEndpoint, isolength&, const void *data);
   int IsochronousMessage(uint8_t bEndpoint, isolength&, void *data);
+  int BulkMessage(uint8_t bEndpoint, const usb_bulkintr_sg *sg);
 
   // execute a delayed callback from the USB handler thread
   int Timer(uint32_t ms, std::function<void()> timer_cb);

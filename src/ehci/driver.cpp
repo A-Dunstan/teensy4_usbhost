@@ -336,6 +336,11 @@ __attribute__((weak)) int USB_Driver::IsochronousMessage(uint8_t,isolength&,void
   return -1;
 }
 
+__attribute__((weak)) int USB_Driver::BulkMessage(uint8_t,const usb_bulkintr_sg*) {
+  errno = ENOSYS;
+  return -1;
+}
+
 const usb_endpoint_descriptor* get_interface_endpoint(const usb_interface_descriptor* desc, uint8_t index) {
   auto src = (const uint8_t*)desc;
 
