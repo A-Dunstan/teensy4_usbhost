@@ -63,8 +63,8 @@ class USB_RNDIS : public USB_Driver, public USB_Driver::Factory {
   uint32_t max_transfer_packets;
   uint32_t max_transfer_size;
   uint32_t link_speed = 0;
-  uint32_t MTU;
-  uint32_t MAX_FRAME_LEN;
+  uint32_t mtu;
+  uint32_t max_frame_len;
   uint32_t maximum_frame_size;
   uint8_t mac_address[6];
 

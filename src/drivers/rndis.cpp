@@ -214,16 +214,16 @@ void USB_RNDIS::init_oids(void) {
     return;
   }
   printf("MAC Address: %02X:%02X:%02X:%02X:%02X:%02X\n", mac_address[0], mac_address[1], mac_address[2], mac_address[3], mac_address[4], mac_address[5]);
-  if (rndis_query(OID_GEN_MAXIMUM_FRAME_SIZE, &MTU, sizeof(MTU)) != sizeof(MTU)) {
+  if (rndis_query(OID_GEN_MAXIMUM_FRAME_SIZE, &mtu, sizeof(mtu)) != sizeof(mtu)) {
     puts("Failed to get MTU");
     return;
   }
-  printf("MTU: %lu\n", MTU);
-  if (rndis_query(OID_GEN_MAXIMUM_TOTAL_SIZE, &MAX_FRAME_LEN, sizeof(MAX_FRAME_LEN)) != sizeof(MAX_FRAME_LEN)) {
+  printf("MTU: %lu\n", mtu);
+  if (rndis_query(OID_GEN_MAXIMUM_TOTAL_SIZE, &max_frame_len, sizeof(max_frame_len)) != sizeof(max_frame_len)) {
     puts("Failed to get MAX_FRAME_LEN");
     return;
   }
-  printf("MAX_FRAME_LEN: %lu\n", MAX_FRAME_LEN);
+  printf("MAX_FRAME_LEN: %lu\n", max_frame_len);
   uint32_t packet_filter = 0xF;
   uint32_t status = rndis_set(OID_GEN_CURRENT_PACKET_FILTER, &packet_filter, sizeof(packet_filter));
   if (status != RNDIS_STATUS_SUCCESS) {
