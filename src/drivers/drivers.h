@@ -28,5 +28,6 @@
 #include "FL2000.h"
 #include "xbox360pad.h"
 #include "aic/aic.h"
+#include "asix88772.h"
 
 #endif // _TEENSY4_USBHOST_DRIVERS_H
