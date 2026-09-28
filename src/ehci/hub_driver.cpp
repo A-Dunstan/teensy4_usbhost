@@ -68,7 +68,7 @@ static USB_Hub_Driver::Factory HubFactory;
 USB_Driver::Factory* USB_Driver::Factory::gList = &HubFactory;
 
 USB_Hub_Driver::USB_Hub_Driver(USB_Device *d, uint8_t status) :
-USB_Hub(d->speed==2 ? d->address : d->hub_addr),dev(d),status_ep(status),hs_port(d->speed==2 ? 16 : d->port) {}
+USB_Hub(d->getSpeed()==2 ? d->getAddress() : d->getHubAddr()),dev(d),status_ep(status),hs_port(d->getSpeed()==2 ? 16 : d->getPort()) {}
 
 void USB_Hub_Driver::detach(void) {
   dprintf("USB_Hub_Driver<%p> detached\n", this);

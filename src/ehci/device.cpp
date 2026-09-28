@@ -769,6 +769,8 @@ void USB_Device::ControlTransfer(uint8_t bmRequestType, uint8_t bmRequest, uint1
 
 bool USB_Device::pushMessage(usb_msg_t& msg, uint32_t delay) {
   switch (msg.type) {
+    case USB_MSG_PORT_STATUS:
+      return host.putMessage(msg);
     case USB_MSG_DEVICE_CONTROL_TRANSFER:
       if (prepare_control_transfer(msg) == false)
         return false;
