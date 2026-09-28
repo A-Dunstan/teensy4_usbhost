@@ -248,7 +248,7 @@ bool asix88772_eth::vendor_command(uint8_t bmr, uint16_t wValue, uint16_t wIndex
   uint8_t buf[32] __attribute__((aligned(32)));
 
   int ret = ControlMessage(USB_CTRLTYPE_DIR_DEVICE2HOST|USB_CTRLTYPE_TYPE_VENDOR|USB_CTRLTYPE_REC_DEVICE, bmr, wValue, wIndex, wLength, buf);
-  if (ret >= 0) memcpy(data, buf, ret);
+  if (ret > 0) memcpy(data, buf, ret);
 
   return ret >= wLength;
 }
