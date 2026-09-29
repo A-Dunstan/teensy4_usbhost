@@ -670,32 +670,36 @@ void asix88772_eth::bulk_in(int r, usb_bulkintr_sg* sg) {
 }
 
 void asix88772_eth::rx_pump(usb_bulkintr_sg* sg) {
-  if (getDevice() == NULL) return;
+  const size_t gather_len = 4;
 
-  while (input_buffers.Size() >= 4) {
-    if (sg==NULL) sg = new(std::nothrow) usb_bulkintr_sg[5];
-    if (sg) {
-      // fill scatter-gather list
-      for (size_t i=0; i < 4; i++) {
-        read_buffer *rd;
-        input_buffers.Get(rd, -1);
-        sg[i] = {rd->data, sizeof(rd->data)};
-      }
-
-      int ret = BulkMessage(ep_in, sg, [=](int r){bulk_in(r, sg);});
-      if (ret < 0) {
-        // request failed, put unused buffers back in the free list
-        for (size_t i=0; i < 4; i++) {
-          input_buffers.Put((read_buffer*)sg[i].data, -1);
+  if (getDevice()) {
+    while (input_buffers.Size() >= gather_len) {
+      if (sg==NULL) sg = new(std::nothrow) usb_bulkintr_sg[gather_len+1];
+      if (sg) {
+        // fill scatter-gather list
+        for (size_t i=0; i < gather_len; i++) {
+          read_buffer *rd;
+          if (input_buffers.Get(rd, -1) != ATOM_OK) {
+            if (i) break; // continue with less than gather_len buffers
+            // else something has gone horribly wrong, bail
+            goto bail_out;
+          }
+          sg[i] = {rd->data, sizeof(rd->data)};
         }
 
-        //dprintf("Failed to queue input\n");
-        break;
+        int ret = BulkMessage(ep_in, sg, [=](int r){bulk_in(r, sg);});
+        if (ret < 0) {
+          //dprintf("Failed to queue input: %d\n", errno);
+          bulk_in(ret, sg);
+          return;
+        }
+
+        sg = NULL;
       }
-      else sg = NULL;
     }
   }
 
+bail_out:
   delete[] sg;
 }
 
