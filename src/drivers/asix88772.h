@@ -20,7 +20,7 @@
 #define _USB_ASIX_88772
 
 class asix88772_eth : public USB_Driver, public USB_Driver::Factory {
-  enum { MAX_INPUT_BUFFERS = 16 };
+  enum { MAX_INPUT_BUFFERS = 12 };
 public:
   struct read_buffer {
     uint8_t data[512] __attribute__((aligned(32)));
