@@ -95,9 +95,7 @@ void asix88772_eth::interrupt(int result) {
     uint8_t flagsdiff = status[2] ^ last_int;
     if (flagsdiff & 1) {
       // link state changed, set BMSR update after 100ms
-      Timer(100, [=]() {
-        pending_ops |= OP_UPDATE_BMSR;
-      });
+      Timer(100, &bmsr_cb);
     }
     if (flagsdiff & status[2] & 4) {
       // bad data sent to bulk out endpoint (frame length error)
@@ -363,9 +361,7 @@ bool asix88772_eth::update_bmsr() {
       // auto-negotiation may still be in progress
       if ((bmcr & BMCR_AUTO_NEGOTIATE) && (old_bmsr & BMSR_LINK_STATUS)==0 && (bmsr & BMSR_LINK_STATUS)) {
         // yes, read BMSR again after 200ms
-        Timer(200, [=]() {
-          pending_ops |= OP_UPDATE_BMSR;
-        });
+        Timer(200, &bmsr_cb);
       }
     }
     update_medium_mode();
@@ -559,7 +555,8 @@ FLASHMEM void asix88772_eth::detach(void) {
   pending_ops = OP_INIT;
 }
 
-FLASHMEM asix88772_eth::asix88772_eth(bool autoNegotiate, bool speed, bool duplex) {
+FLASHMEM asix88772_eth::asix88772_eth(bool autoNegotiate, bool speed, bool duplex) :
+bmsr_cb([=]() { pending_ops |= OP_UPDATE_BMSR; }) {
   auto mac1 = HW_OCOTP_MAC1;
   auto mac0 = HW_OCOTP_MAC0;
   asix_mac.addr[0] = mac1 >> 8;

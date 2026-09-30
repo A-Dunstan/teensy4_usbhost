@@ -88,6 +88,7 @@ private:
 
   void interrupt(int);
   const USBCallback status_cb = [=](int r) { interrupt(r); };
+  const std::function<void()> bmsr_cb;
 
   bool init();
   bool update_mac_filter();
