@@ -76,7 +76,7 @@ private:
   uint8_t ep_status;
   uint8_t ep_out;
   uint8_t ep_in;
-  volatile uint32_t pending_ops;
+  std::atomic<uint32_t> pending_ops;
   uint8_t last_int;
 
   bool vendor_command(uint8_t,uint16_t,uint16_t,uint16_t,void*);
