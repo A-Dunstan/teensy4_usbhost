@@ -476,7 +476,7 @@ void USB_Host::add_periodic_queue(USB_Periodic_Endpoint *ep) {
   uint8_t ctime = ep->ctime;
   uint8_t s_mask, c_mask;
   ep->get_masks(s_mask, c_mask);
-  dprintf("Endpoint<%p> interval %lu offset %lu stime %u ctime %u s_mask %02X c_mask %02X\n", ep, interval, offset, stime, ctime, s_mask, c_mask);
+  dprintf("Endpoint<%p> interval %lu \toffset %lu\tstime %u ctime %u s_mask %02X c_mask %02X\n", ep, interval, offset, stime, ctime, s_mask, c_mask);
 
   /* use the interval and offset to insert the endpoint into the periodic schedule,
     * and s_mask+c_mask to update uframe_bandwidth

@@ -50,9 +50,16 @@
 #define USB_REQ_SET_INTERFACE            11
 
 /* non-standard (class) requests */
+#define USB_REQ_GETREPORT                1
+#define USB_REQ_SETREPORT                9
 #define USB_REQ_SETPROTOCOL              11
 
 #define USB_FEATURE_ENDPOINT_HALT        0
+
+/* HID Report Types */
+#define USB_REPTYPE_INPUT                1
+#define USB_REPTYPE_OUTPUT               2
+#define USB_REPTYPE_FEATURE              3
 
 #define USB_DT_DEVICE                    1
 #define USB_DT_CONFIGURATION             2

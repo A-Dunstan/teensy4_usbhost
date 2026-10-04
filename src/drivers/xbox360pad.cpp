@@ -22,25 +22,54 @@
 #define FLAG_SETLED           (1<<0)
 #define FLAG_SETRUMBLE        (1<<1)
 
-void XBOX360Pad::interrupt_in(int r) {
+void XBOX360PadBase::report_in(int r) {
+  const uint8_t* in = rep_in;
+
+  if (wireless) {
+    int len = r;
+    if (len >= 2) {
+      r = 0;
+      if (in[0] & 0x08) { // notification that a controller connected/disconnected
+        ready = in[1] & 0x80;
+      }
+      else if (in[1]==1 && len > 4) {
+        in = rep_in + 4;
+        r = len-4;
+      }
+    }
+  }
+
   if (r >= 2) {
-    ready = true;
-    switch (rep_in[0]) {
+    switch (in[0]) {
       case 0: // report 0: this is the button/stick/trigger data
         if (r >= 20) {
-          state.buttons = rep_in[2] | (rep_in[3]<<8);
-          state.trigger[0] = rep_in[4];
-          state.trigger[1] = rep_in[5];
-          state.stick[0][0] = rep_in[6] | (rep_in[7]<<8);
-          state.stick[0][1] = rep_in[8] | (rep_in[9]<<8);
-          state.stick[1][0] = rep_in[10] | (rep_in[11]<<8);
-          state.stick[1][1] = rep_in[12] | (rep_in[13]<<8);
+          ready = true;
+          update_padbutton(Gamepad::Button::DPAD_UP,      in[2]&0x01 ? 255 : 0);
+          update_padbutton(Gamepad::Button::DPAD_DOWN,    in[2]&0x02 ? 255 : 0);
+          update_padbutton(Gamepad::Button::DPAD_LEFT,    in[2]&0x04 ? 255 : 0);
+          update_padbutton(Gamepad::Button::DPAD_RIGHT,   in[2]&0x08 ? 255 : 0);
+          update_padbutton(Gamepad::Button::START,        in[2]&0x10 ? 255 : 0);
+          update_padbutton(Gamepad::Button::SELECT,       in[2]&0x20 ? 255 : 0);
+          update_padbutton(Gamepad::Button::LEFT_STICK,   in[2]&0x40 ? 255 : 0);
+          update_padbutton(Gamepad::Button::RIGHT_STICK,  in[2]&0x80 ? 255 : 0);
+          update_padbutton(Gamepad::Button::LEFT_BUMPER,  in[3]&0x01 ? 255 : 0);
+          update_padbutton(Gamepad::Button::RIGHT_BUMPER, in[3]&0x02 ? 255 : 0);
+          update_padbutton(Gamepad::Button::SYSTEM,       in[3]&0x04 ? 255 : 0);
+          update_padbutton(Gamepad::Button::FACE_BOTTOM,  in[3]&0x10 ? 255 : 0);
+          update_padbutton(Gamepad::Button::FACE_RIGHT,   in[3]&0x20 ? 255 : 0);
+          update_padbutton(Gamepad::Button::FACE_LEFT,    in[3]&0x40 ? 255 : 0);
+          update_padbutton(Gamepad::Button::FACE_TOP,     in[3]&0x80 ? 255 : 0);
+          update_padbutton(Gamepad::Button::LEFT_TRIGGER, in[4]);
+          update_padbutton(Gamepad::Button::RIGHT_TRIGGER, in[5]);
+          update_padstick(Gamepad::Stick::LEFT_X, in[6]|(in[7]<<8));
+          update_padstick(Gamepad::Stick::LEFT_Y, in[8]|(in[9]<<8));
+          update_padstick(Gamepad::Stick::RIGHT_X, in[10]|(in[11]<<8));
+          update_padstick(Gamepad::Stick::RIGHT_Y, in[12]|(in[13]<<8));
         }
         break;
       case 1: // response to output report 1, returns LED state
         if (r >= 3) {
-          dprintf("XBOX LED state: %02X\n", rep_in[2]);
-          if (rep_in[2] != led) {
+          if (in[2] != led) {
             // set it again because it didn't listen
             setLED(led);
           }
@@ -53,11 +82,12 @@ void XBOX360Pad::interrupt_in(int r) {
 //      case 8:
     }
   }
-  if (r != -ENODEV)
+
+  if (r != -ENODEV && r != -ENXIO)
     InterruptMessage(ep_in, sizeof(rep_in), rep_in, &in_cb);
 }
 
-void XBOX360Pad::interrupt_out(int r) {
+void XBOX360PadBase::report_out(int r) {
   if (r >= 0) {
     auto lock = mutex.Lock(10);
     flags &= ~FLAG_INPROGRESS;
@@ -72,22 +102,32 @@ void XBOX360Pad::interrupt_out(int r) {
   }
 }
 
-FLASHMEM void XBOX360Pad::setLED(uint8_t new_led) {
+FLASHMEM void XBOX360PadBase::setPlayerLED(uint8_t new_led) {
+  setLED(6+(new_led&3));
+}
+
+FLASHMEM void XBOX360PadBase::setLED(uint32_t new_led) {
   auto lock = mutex.Lock(10);
 
-  led = new_led;
+  led = (uint8_t)new_led;
   if (flags & FLAG_INPROGRESS) {
     flags |= FLAG_SETLED;
   } else {
     flags |= FLAG_INPROGRESS;
-    rep_out[0] = 1;
-    rep_out[1] = 3;
-    rep_out[2] = led;
-    InterruptMessage(ep_out, 3, rep_out, &out_cb);
+    if (!wireless) {
+      rep_out[0] = 1;
+      rep_out[1] = 3;
+      rep_out[2] = led;
+    } else {
+      memset(rep_out, 0, 12);
+      rep_out[2] = 8;
+      rep_out[3] = 0x40 + led;
+    }
+    InterruptMessage(ep_out, wireless ? 12 : 3, rep_out, &out_cb);
   }
 }
 
-void XBOX360Pad::setRumble(uint8_t heavy, uint8_t light) {
+void XBOX360PadBase::setRumble(uint8_t heavy, uint8_t light) {
   auto lock = mutex.Lock(10);
 
   if (flags & FLAG_INPROGRESS) {
@@ -96,72 +136,94 @@ void XBOX360Pad::setRumble(uint8_t heavy, uint8_t light) {
     motor_light = light;
   } else {
     flags |= FLAG_INPROGRESS;
-    memset(rep_out, 0, 8);
-    rep_out[0] = 0;
-    rep_out[1] = 8;
-    rep_out[3] = heavy;
-    rep_out[4] = light;
-    InterruptMessage(ep_out, 8, rep_out, &out_cb);
+    memset(rep_out, 0, 12);
+    if (!wireless) {
+      rep_out[1] = 8;
+      rep_out[3] = heavy;
+      rep_out[4] = light;
+    } else {
+      rep_out[1] = 1;
+      rep_out[2] = 0xF;
+      rep_out[3] = 0xC0;
+      rep_out[5] = heavy;
+      rep_out[6] = light;
+    }
+    InterruptMessage(ep_out, wireless ? 12: 8, rep_out, &out_cb);
   }
 }
 
-FLASHMEM const usb_endpoint_descriptor* XBOX360Pad::find_endpoint(const void* p, size_t& length) {
-  if (p == NULL) return NULL;
-  // find IN/OUT interrupt endpoints that are exactly 32 bytes long
-  const uint8_t *b = (const uint8_t*)p;
-  const uint8_t *end = b + length - 2;
-  for (b += b[0]; b < end && b[0]; b += b[0]) {
-    // if we hit an alternate interface, abort
-    if (b[1] == USB_DT_INTERFACE) break;
-    if (b[1] != USB_DT_ENDPOINT) continue;
+FLASHMEM bool XBOX360PadBase::driver_match(const usb_interface_descriptor* id, size_t length) {
+  if (id->bInterfaceClass != 255) return false;
+  if (id->bInterfaceSubClass != 93) return false;
+  if (id->bInterfaceProtocol != 1 && \
+      id->bInterfaceProtocol != 0x81) return false;
+  if (id->bNumEndpoints < 2) return false;
+  return true;
+}
 
-    const usb_endpoint_descriptor *ep = (const usb_endpoint_descriptor*)b;
+FLASHMEM USB_Driver* XBOX360Pad::offer(const usb_interface_descriptor* id, size_t length, const USB_Device*) {
+  if (getDevice() != NULL) return NULL;
+  if (!driver_match(id, length)) return NULL;
+  return this;
+}
+
+FLASHMEM bool XBOX360PadBase::attach(const usb_interface_descriptor* id, size_t length) {
+  ep_in = ep_out = 0;
+  for (uint8_t i=0; i < id->bNumEndpoints; i++) {
+    auto ep = get_interface_endpoint(id, i);
     if (ep->bmAttributes != USB_ENDPOINT_INTERRUPT)
       continue;
     if (ep->wMaxPacketSize != REP_SIZE)
       continue;
 
-    length -= b - (const uint8_t*)p;
-    return ep;
-  }
-  return NULL;
-}
-
-FLASHMEM USB_Driver* XBOX360Pad::offer(const usb_interface_descriptor* id, size_t length, const USB_Device*) {
-  if (getDevice() != NULL) return NULL;
-  if (id->bInterfaceClass != 255) return NULL;
-  if (id->bInterfaceSubClass != 93) return NULL;
-  if (id->bInterfaceProtocol != 1) return NULL;
-  ep_in = ep_out = 255;
-  auto ep1 = find_endpoint(id, length);
-  auto ep2 = find_endpoint(ep1, length);
-  if (ep1 != NULL) {
-    if (ep1->bEndpointAddress & 0x80) {
-      ep_in = ep1->bEndpointAddress;
-      if (ep2 && (ep2->bEndpointAddress & 0x80)==0)
-        ep_out = ep2->bEndpointAddress;
-    } else {
-      ep_out = ep1->bEndpointAddress;
-      if (ep2 && (ep2->bEndpointAddress & 0x80))
-        ep_in = ep2->bEndpointAddress;
+    if (ep->bEndpointAddress & 0x80) {
+      if (ep_in == 0) ep_in = ep->bEndpointAddress;
+    } else if (ep_out == 0)
+      ep_out = ep->bEndpointAddress;
     }
+
+    if (ep_in && ep_out) {
+      wireless = (id->bInterfaceProtocol == 0x81);
+//      dprintf("XBOX360 attached (%s)\n", wireless ? "wireless" : "wired");
+      flags = 0;
+      reset_padstate();
+      setLED(0);
+      return InterruptMessage(ep_in, sizeof(rep_in), rep_in, &in_cb) >= 0;
   }
-  if (ep_in != 255 && ep_out != 255) {
-    dprintf("Found XBOX360 compatible controller, ep_in = %02X, ep_out = %02X\n", ep_in, ep_out);
-    return this;
+
+  return false;
+}
+
+FLASHMEM void XBOX360PadBase::detach(void) {
+//  dprintf("XBOX360 detached");
+  reset_padstate();
+  ready = false;
+}
+
+const char* XBOX360PadBase::getXBOXButtonName(uint8_t btn) {
+  switch (btn) {
+    case Gamepad::Button::SELECT:
+      return PSTR("BACK");
+    case Gamepad::Button::LEFT_TRIGGER:
+      return PSTR("LT");
+    case Gamepad::Button::RIGHT_TRIGGER:
+      return PSTR("RT");
+    case Gamepad::Button::SYSTEM:
+      return PSTR("XBOX_BUTTON");
+    case Gamepad::Button::FACE_TOP:
+      return PSTR("Y");
+    case Gamepad::Button::FACE_RIGHT:
+      return PSTR("B");
+    case Gamepad::Button::FACE_BOTTOM:
+      return PSTR("A");
+    case Gamepad::Button::FACE_LEFT:
+      return PSTR("X");
   }
   return NULL;
 }
 
-FLASHMEM bool XBOX360Pad::attach(const usb_interface_descriptor* id, size_t length) {
-  flags = 0;
-  setLED(6);
-  return InterruptMessage(ep_in, sizeof(rep_in), rep_in, &in_cb) >= 0;
-}
-
-FLASHMEM void XBOX360Pad::detach(void) {
-  dprintf("XBOX360 detached");
-  memset(&state, 0, sizeof(state));
-  cur_buttons = 0;
-  ready = false;
+const char* XBOX360PadBase::getDeviceType() const {
+  if (wireless)
+    return PSTR("XBOX360 Wireless Controller");
+  return PSTR("XBOX360 Wired Controller");
 }

@@ -19,26 +19,13 @@
 #ifndef _USB_XBOX360PAD_H
 #define _USB_XBOX360PAD_H
 
-#define XBOX_BUTTON_UP           0x0001
-#define XBOX_BUTTON_DOWN         0x0002
-#define XBOX_BUTTON_LEFT         0x0004
-#define XBOX_BUTTON_RIGHT        0x0008
-#define XBOX_BUTTON_START        0x0010
-#define XBOX_BUTTON_BACK         0x0020
-#define XBOX_BUTTON_SELECT       XBOX_BUTTON_BACK
-#define XBOX_BUTTON_L3           0x0040
-#define XBOX_BUTTON_R3           0x0080
-#define XBOX_BUTTON_LB           0x0100
-#define XBOX_BUTTON_RB           0x0200
-#define XBOX_BUTTON_SYSTEM       0x0400
-#define XBOX_BUTTON_A            0x1000
-#define XBOX_BUTTON_B            0x2000
-#define XBOX_BUTTON_X            0x4000
-#define XBOX_BUTTON_Y            0x8000
+#include "gamepad.h"
 
-class XBOX360Pad : public USB_Driver, public USB_Driver::Factory {
-
+class XBOX360PadBase : public USB_Driver, protected Gamepad::Impl  {
   enum { REP_SIZE = 32 };
+  uint8_t rep_in[REP_SIZE] __attribute__((aligned(32)));
+  uint8_t rep_out[REP_SIZE] __attribute__((aligned(32)));
+
   volatile bool ready = false;
   uint8_t ep_in;
   uint8_t ep_out;
@@ -46,61 +33,47 @@ class XBOX360Pad : public USB_Driver, public USB_Driver::Factory {
   AtomMutex mutex;
   uint8_t led;
   uint8_t motor_heavy, motor_light;
-  uint32_t flags;
+  std::atomic<uint32_t> flags;
+  bool wireless;
 
-  struct {
-    uint16_t buttons;
-    uint8_t trigger[2]; // left,right
-    int16_t stick[2][2]; // left X/Y, right X/Y
-  } state = {0};
-  uint16_t cur_buttons = 0;
-  uint16_t old_buttons = 0;
+  const USBCallback in_cb = [=](int r) { report_in(r); };
+  const USBCallback out_cb = [=](int r) { report_out(r); };
 
-  const USBCallback in_cb = [=](int r) { interrupt_in(r); };
-  const USBCallback out_cb = [=](int r) { interrupt_out(r); };
+  void report_in(int);
+  void report_out(int);
 
-  uint8_t rep_in[REP_SIZE] __attribute__((aligned(32)));
-  uint8_t rep_out[REP_SIZE] __attribute__((aligned(32)));
-
-  static const usb_endpoint_descriptor* find_endpoint(const void*,size_t&);
-  void interrupt_in(int);
-  void interrupt_out(int);
-
-  // Factory overrides
-  USB_Driver* offer(const usb_interface_descriptor*, size_t, const USB_Device*) override;
+  // USB_Driver
   bool attach(const usb_interface_descriptor*,size_t) override;
+protected:
   void detach(void) override;
 
+  // GamePad::Impl
+  bool isReady() { return ready; }
+  void setPlayerLED(uint8_t id) override;
+  void setLED(uint32_t led_value) override;
+  void setRumble(uint8_t heavy, uint8_t light) override;
+  const char* getButtonName(uint8_t btn) const override { return getXBOXButtonName(btn); }
+  const char* getDeviceType() const override;
+
 public:
-  XBOX360Pad() = default;
-  ~XBOX360Pad() = default;
-  operator bool() const { return ready; }
-
-  // values 6-9 are the typical player 1-4 indicators
-  void setLED(uint8_t led_value);
-  // there's two rumble motors: one is smaller and produces lighter vibration
-  void setRumble(uint8_t heavy, uint8_t light);
-
-  // capture the current button state
-  uint16_t update(void) { return old_buttons = cur_buttons, cur_buttons = state.buttons; }
-  // buttons that stayed down since last update call
-  uint16_t held(void) const { return old_buttons & cur_buttons; }
-  // buttons that went up or down since last update
-  uint16_t changed(void) const {return old_buttons ^ cur_buttons; }
-  // buttons that went down since last update
-  uint16_t pressed(void) const { return ~old_buttons & cur_buttons; }
-  // buttons that went up since last update
-  uint16_t released(void) const { return old_buttons & ~cur_buttons; }
-
-  uint16_t buttons(void) const { return cur_buttons; }
-  uint8_t triggerL(void) const { return state.trigger[0]; }
-  uint8_t triggerR(void) const { return state.trigger[1]; }
-  // stick ranges: -32768 to 32767
-  int stickLX(void) const { return state.stick[0][0]; }
-  int stickLY(void) const { return state.stick[0][1]; }
-  int stickRX(void) const { return state.stick[1][0]; }
-  int stickRY(void) const { return state.stick[1][1]; }
+  static const char* getXBOXButtonName(uint8_t);
+  static bool driver_match(const usb_device_descriptor*, const usb_configuration_descriptor*) { return false; }
+  static bool driver_match(const usb_interface_descriptor*, size_t);
+  XBOX360PadBase(Gamepad& p) : Gamepad::Impl(p) {}
 };
 
+class XBOX360Pad : public Gamepad, public XBOX360PadBase, private USB_Driver::Factory {
+  // USB_Driver::Factory
+  USB_Driver* offer(const usb_interface_descriptor*, size_t, const USB_Device*) override;
+public:
+  // solve ambiguities caused by inheriting both Gamepad and Gamepad::Impl
+  using XBOX360PadBase::setPlayerLED;
+  using XBOX360PadBase::setLED;
+  using XBOX360PadBase::setRumble;
+  using XBOX360PadBase::getDeviceType;
+  using Gamepad::getButtonName;
+  using Gamepad::getStickName;
+  XBOX360Pad() : XBOX360PadBase(*static_cast<Gamepad*>(this)) {}
+};
 
 #endif
