@@ -134,10 +134,16 @@ public:
 };
 
 USB_Device::Endpoint_Elem& USB_Device::Endpoint_Array::operator[] (size_t ep_addr) {
-  size_t index = ep_addr & 0x7F;
-  if (index != 0) {
-    if (index >= 16) index = 0;
-    else if (ep_addr & 0x80) index += 15;
+  size_t index;
+  switch (ep_addr) {
+    case 0x01 ... 0x0F:
+      index = ep_addr;
+      break;
+    case 0x81 ... 0x8F:
+      index = ep_addr - 0x80 + 15;
+      break;
+    default:
+      index = 0;
   }
   return eps[index];
 }
