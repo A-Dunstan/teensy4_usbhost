@@ -83,7 +83,7 @@ void XBOX360PadBase::report_in(int r) {
     }
   }
 
-  if (r != -ENODEV && r != -ENXIO)
+  if (r != -ENODEV)
     InterruptMessage(ep_in, sizeof(rep_in), rep_in, &in_cb);
 }
 

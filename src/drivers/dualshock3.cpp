@@ -80,7 +80,7 @@ void PS3PadBase::report_in(int r) {
 
 void PS3PadBase::interrupt_in(int r) {
   if (r > 0) report_in(r);
-  if (r != -ENODEV && r != -ENXIO)
+  if (r != -ENODEV)
     InterruptMessage(ep_in, sizeof(rep_in), rep_in, &in_cb);
 }
 

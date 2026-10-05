@@ -729,7 +729,7 @@ void USB_Device::BulkTransfer(uint8_t bEndpoint, uint32_t dLength, void* data, c
     if (bulk_intr_transfer(dLength, data, packet_align, Transfer) == 0)
       return;
   }
-  else errno = ENXIO;
+  else errno = ENODEV;
   (*cb)(-errno);
 }
 
@@ -738,7 +738,7 @@ void USB_Device::BulkTransfer(uint8_t bEndpoint, const usb_bulkintr_sg *sg, cons
     if (Endpoints[bEndpoint].ep->BulkTransfer(sg, cb) == 0)
       return;
   }
-  else errno = ENXIO;
+  else errno = ENODEV;
   (*cb)(-errno);
 }
 
@@ -754,7 +754,7 @@ void USB_Device::InterruptTransfer(uint8_t bEndpoint, uint16_t dLength, void *da
     if (bulk_intr_transfer(dLength, data, packet_align, Transfer) == 0)
       return;
   }
-  else errno = ENXIO;
+  else errno = ENODEV;
   (*cb)(-errno);
 }
 
@@ -763,7 +763,7 @@ void USB_Device::IsochronousTransfer(uint8_t bEndpoint, isolength& Lengths, void
     if (Endpoints[bEndpoint].ep->IsochronousTransfer(Lengths, data, cb) == 0)
       return;
   }
-  else errno = ENXIO;
+  else errno = ENODEV;
   (*cb)(-errno);
 }
 
