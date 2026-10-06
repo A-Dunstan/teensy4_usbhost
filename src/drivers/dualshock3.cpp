@@ -184,6 +184,8 @@ FLASHMEM bool PS3PadBase::attach(const usb_device_descriptor* dd, const usb_conf
         if (r >= 4) {
           ready = true;
           led = 0xFF;
+          motor_heavy = 0;
+          motor_light = 0;
           setPlayerLED(0);
           interrupt_in(0);
         }
