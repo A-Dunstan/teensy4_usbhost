@@ -60,9 +60,9 @@ void PS3PadBase::report_in(int r) {
       update_padbutton(Gamepad::Button::FACE_BOTTOM,   rep_in[24]);
       update_padbutton(Gamepad::Button::FACE_LEFT,     rep_in[25]);
       update_padstick(Gamepad::Stick::LEFT_X, convert_stick(rep_in[6]));
-      update_padstick(Gamepad::Stick::LEFT_Y, 65535 - convert_stick(rep_in[7]));
+      update_padstick(Gamepad::Stick::LEFT_Y, -1 - convert_stick(rep_in[7]));
       update_padstick(Gamepad::Stick::RIGHT_X, convert_stick(rep_in[8]));
-      update_padstick(Gamepad::Stick::RIGHT_Y, 65535 - convert_stick(rep_in[9]));
+      update_padstick(Gamepad::Stick::RIGHT_Y, -1 - convert_stick(rep_in[9]));
 
       update_padstick(ACC_X, (rep_in[41]<<8)|rep_in[42]);
       update_padstick(ACC_Y, (rep_in[43]<<8)|rep_in[44]);
