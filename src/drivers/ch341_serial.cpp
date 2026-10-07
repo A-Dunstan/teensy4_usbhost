@@ -114,11 +114,8 @@ void serial::calculate_baud(uint32_t baud) {
   static const struct { unsigned char pre; float scale; } scalers[] = {
     {7, 1.0f},
     {3, 2.0f},
-    {6, 8.0f},
     {2, 16.0f},
-    {5, 64.0f},
     {1, 128.0f},
-    {4, 512.0f},
     {0, 1024.0f}
   };
 
@@ -128,16 +125,10 @@ void serial::calculate_baud(uint32_t baud) {
     c = 12000000.0f / scalers[i].scale;
     i++;
     a = floor(c / baud);
-  } while (b && a > 256);
-
-  // factors <= 8 without a prescaler need to be halved
-  if (a <= 8 && b==7) {
-    c = 6000000.0f;
-    a >>= 1;
-  }
+  } while (b && a > 255);
 
   if ((c / a - baud) > (baud - c / (a + 1)))
-  a++;
+    ++a;
   a = 256 - a;
 
   factor = (unsigned char)a;
@@ -209,7 +200,7 @@ void serial::dtr_rts_callback(int result, uint8_t old_status, uint8_t new_status
       dprintf("Setting new DTR/RTS failed %d\n", result);
       out_status = old_status;
     } else {
-      dprintf("Setting new DTR/RTS succeeded\n");
+//      dprintf("Setting new DTR/RTS succeeded\n");
       out_status = new_status;
     }
   }
