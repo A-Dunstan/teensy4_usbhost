@@ -30,5 +30,6 @@
 #include "aic/aic.h"
 #include "asix88772.h"
 #include "dualshock3.h"
+#include "PCS_PS2pad.h"
 
 #endif // _TEENSY4_USBHOST_DRIVERS_H

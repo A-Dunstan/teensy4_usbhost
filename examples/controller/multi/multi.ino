@@ -15,6 +15,8 @@ class MultiController : public Gamepad, private USB_Driver::Factory {
     if (driver) return NULL;
     if (PS3PadBase::driver_match(dd, cd))
       driver = new DynController<PS3PadBase>(*this);
+    else if (PCS_PSPadBase::driver_match(dd, cd))
+      driver = new DynController<PCS_PSPadBase>(*this);
 
     return driver;
   }
