@@ -54,7 +54,7 @@ public:
 
     STICK_CUSTOM,
 
-    STICK_COUNT = 8
+    STICK_COUNT = 16
   };
 
 private:
