@@ -211,7 +211,7 @@ FLASHMEM bool PS3PadBase::getBluetoothMAC(uint8_t* dst) const {
   return false;
 }
 
-const char* PS3PadBase::getPSButtonName(uint8_t btn) {
+const char* getPlaystationButtonName(uint8_t btn) {
   switch (btn) {
     case Gamepad::Button::LEFT_BUMPER:
       return PSTR("L1");

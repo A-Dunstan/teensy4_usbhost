@@ -21,6 +21,8 @@
 
 #include "gamepad.h"
 
+const char* getPlaystationButtonName(uint8_t);
+
 class PS3PadBase : public USB_Driver, protected Gamepad::Impl {
   enum {
     ACC_X = Gamepad::Stick::STICK_CUSTOM,
@@ -59,12 +61,11 @@ protected:
   bool isReady() override { return ready; }
   void setPlayerLED(uint8_t) override;
   void setRumble(uint8_t, uint8_t) override;
-  const char* getButtonName(uint8_t btn) const override { return getPSButtonName(btn); }
+  const char* getButtonName(uint8_t btn) const override { return getPlaystationButtonName(btn); }
   const char* getStickName(uint8_t stk) const override;
   const char* getDeviceType() const override;
 
 public:
-  static const char* getPSButtonName(uint8_t);
   static bool driver_match(const usb_device_descriptor*, const usb_configuration_descriptor*);
   static bool driver_match(const usb_interface_descriptor*, size_t) { return false; }
   PS3PadBase(Gamepad& p) : Gamepad::Impl(p) {}
