@@ -25,6 +25,7 @@ class USB_Driver {
   friend USB_Device;
 private:
   USB_Device* device = NULL;
+  void detach_device(void) { device = NULL; detach(); }
   virtual void detach(void) = 0;
   virtual bool attach(const usb_device_descriptor*,const usb_configuration_descriptor*) { return false; }
   virtual bool attach(const usb_interface_descriptor*,size_t) { return false; }

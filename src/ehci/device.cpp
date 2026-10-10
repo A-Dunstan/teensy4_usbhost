@@ -330,8 +330,7 @@ void USB_Device::deref(void) {
   if (refcount.fetch_sub(1) == 1) {
     // detach all drivers
     for (auto drv : drivers) {
-      drv->device = NULL;
-      drv->detach();
+      drv->detach_device();
     }
     usb_msg_t msg = {
       .type = USB_MSG_ADDRESS_RELEASED,
@@ -438,7 +437,7 @@ void USB_Device::search_for_drivers(void) {
         drivers.push_back(d);
         return;
       }
-      d->detach();
+      d->detach_device();
     }
   }
   // else offer each individual interface from first configuration
@@ -459,7 +458,7 @@ void USB_Device::search_for_drivers(void) {
       if (d->attach(iface, l)) {
         drivers.push_back(d);
       } else {
-        d->detach();
+        d->detach_device();
       }
     }
   }
