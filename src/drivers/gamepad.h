@@ -101,11 +101,11 @@ public:
   operator bool() const { return impl && impl->isReady(); }
 
   // set player indicator: 0-3
-  virtual void setPlayerLED(uint8_t id) { if (impl) return impl->setPlayerLED(id); }
+  virtual void setPlayerLED(uint8_t id) { if (impl) impl->setPlayerLED(id); }
   // do something controller-specific with the LED
-  virtual void setLED(uint32_t led_value) { if (impl) return impl->setLED(led_value); }
+  virtual void setLED(uint32_t led_value) { if (impl) impl->setLED(led_value); }
   // supports separate heavy and light motors
-  virtual void setRumble(uint8_t heavy, uint8_t light=0) { if (impl) return impl->setRumble(heavy, light); }
+  virtual void setRumble(uint8_t heavy, uint8_t light=0) { if (impl) impl->setRumble(heavy, light); }
   // return a text name for the button
   virtual const char* getButtonName(uint8_t btn) const;
   // returns the type of controller
