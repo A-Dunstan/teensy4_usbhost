@@ -575,8 +575,10 @@ void USB_Device::activate_interface(uint8_t interface, int altsetting) {
   if (altsetting < 0)
     return;
 
-  // set the new interface
-  control.Transfer(USB_REQTYPE_INTERFACE_SET, USB_REQ_SET_INTERFACE, altsetting, interface, 0, NULL, this);
+  // check if we actually need to set the interface - if only one altsetting exists, skip it
+  if (di->getInterface(1) != NULL)
+    control.Transfer(USB_REQTYPE_INTERFACE_SET, USB_REQ_SET_INTERFACE, altsetting, interface, 0, NULL, this);
+
   // activate new endpoints
   for (auto ep : to_add) {
     activate_endpoint(ep);
